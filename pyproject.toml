@@ -1,0 +1,12 @@
+[project]
+name = "512890"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "backtesting>=0.6.5",
+    "mplfinance>=0.12.10b0",
+    "pandas>=3.0.2",
+    "pyarrow>=23.0.1",
+]

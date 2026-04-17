@@ -1,0 +1,25 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "uv": true,
+        "/usr/local/bin/python3": true,
+        "/^python main\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "./.venv/bin/python": true,
+        "get_terminal_output": true,
+        "/^python3 -c \"import pandas as pd; df = pd\\.read_csv\\('reports/wf3y1y_event_breakout_strategy_summary\\.csv'\\); print\\(df\\[\\['polyfit_年化收益率', 'launch_年化收益率', 'retest_年化收益率', 'event_年化收益率'\\]\\]\\.mean\\(\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python3 -c \"import pandas as pd; df = pd\\.read_csv\\('reports/wf3y1y_event_breakout_strategy_summary\\.csv'\\); cols = \\['window', 'launch_交易次数', 'retest_交易次数', 'event_交易次数', 'launch_总收益率', 'retest_总收益率', 'event_总收益率'\\]; print\\(df\\[cols\\]\\); print\\('\\\\nNon-zero trade window counts:'\\); print\\(\\(df\\[\\['launch_交易次数', 'retest_交易次数', 'event_交易次数'\\]\\] > 0\\)\\.sum\\(\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python3 -c \"import pandas as pd; df = pd\\.read_csv\\('reports/wf3y1y_event_breakout_strategy_summary\\.csv'\\); \n# Normalizing column names by removing spaces and newlines if any\ndf\\.columns = \\[c\\.replace\\(' ', ''\\)\\.replace\\('\\\\n', ''\\) for c in df\\.columns\\]\ncols = \\['窗口', 'launch_交易次数', 'retest_交易次数', 'event_交易次数', 'launch_总收益率', 'retest_总收益率', 'event_总收益率'\\]\n# Checking actual columns in df\nprint\\('Columns found:', \\[c for c in cols if c in df\\.columns\\]\\)\nprint\\(df\\[\\[c for c in cols if c in df\\.columns\\]\\]\\)\nprint\\('\\\\nNon-zero trade window counts:'\\)\ntrade_cols = \\['launch_交易次数', 'retest_交易次数', 'event_交易次数'\\]\nvalid_trade_cols = \\[c for c in trade_cols if c in df\\.columns\\]\nprint\\(\\(df\\[valid_trade_cols\\] > 0\\)\\.sum\\(\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}
