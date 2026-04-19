@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
-from main import resolve_data_path, load_and_forward_adjust
+
+from backtest_core.data import resolve_data_path, load_and_forward_adjust
 
 def analyze():
     # Load data
