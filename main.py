@@ -5,14 +5,12 @@ from pathlib import Path
 import time
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib import font_manager
 import numpy as np
 import pandas as pd
 from backtesting import Backtest
 
-from strategies.breakout_retest_momentum_strategy import BreakoutRetestMomentumStrategy
-from strategies.event_driven_launch_strategy import EventDrivenLaunchStrategy
-from strategies.launch_breakout_momentum_strategy import LaunchBreakoutMomentumStrategy
 from strategies.moving_average_dynamic_grid_strategy import MovingAverageDynamicGridStrategy
 from strategies.polyfit_dynamic_grid_strategy import PolyfitDynamicGridStrategy
 
@@ -51,91 +49,9 @@ MA_SCAN_PARAM_NAMES = [
     "position_sizing_coef",
 ]
 
-LAUNCH_SCAN_PARAM_NAMES = [
-    "fast_ema_window",
-    "slow_ema_window",
-    "trend_slope_window",
-    "breakout_window",
-    "exit_window",
-    "atr_window",
-    "volume_window",
-    "short_vol_window",
-    "long_vol_window",
-    "breakout_buffer_atr",
-    "min_trend_slope",
-    "min_breakout_return",
-    "min_close_strength",
-    "min_volume_ratio",
-    "max_compression_ratio",
-    "min_range_to_atr",
-    "min_continuation_return",
-    "min_continuation_volume_ratio",
-    "initial_stop_atr_mult",
-    "trailing_atr_mult",
-    "max_holding_days",
-    "position_size",
-]
-
-RETEST_SCAN_PARAM_NAMES = [
-    "fast_ema_window",
-    "slow_ema_window",
-    "trend_slope_window",
-    "breakout_window",
-    "exit_window",
-    "atr_window",
-    "volume_window",
-    "short_vol_window",
-    "long_vol_window",
-    "breakout_buffer_atr",
-    "retest_tolerance_atr",
-    "retest_window_days",
-    "min_trend_slope",
-    "min_breakout_volume_ratio",
-    "min_retest_volume_ratio",
-    "max_setup_compression_ratio",
-    "min_breakout_range_to_atr",
-    "max_extension_pct",
-    "initial_stop_atr_mult",
-    "trailing_atr_mult",
-    "max_holding_days",
-    "position_size",
-]
-
-EVENT_SCAN_PARAM_NAMES = [
-    "fast_ema_window",
-    "slow_ema_window",
-    "trend_slope_window",
-    "breakout_window",
-    "exit_window",
-    "atr_window",
-    "volume_window",
-    "short_vol_window",
-    "long_vol_window",
-    "min_gap_return",
-    "min_event_return",
-    "min_close_strength",
-    "min_volume_ratio",
-    "max_compression_ratio",
-    "min_range_to_atr",
-    "min_trend_slope",
-    "max_extension_pct",
-    "initial_stop_atr_mult",
-    "trailing_atr_mult",
-    "max_holding_days",
-    "position_size",
-]
-
-LAUNCH_TARGET_PERIODS: list[tuple[str, str]] = [
-    ("2024-03-01", "2024-03-31"),
-    ("2024-09-01", "2024-09-30"),
-    ("2025-04-01", "2025-04-30"),
-    ("2025-10-01", "2025-10-31"),
-]
-
-
 def build_param_space() -> dict[str, list]:
     return {
-        "fit_window_days": [630, 756, 882],
+        "fit_window_days": [252],
         "trend_window_days": [10, 15, 20],
         "vol_window_days": [5, 10, 15, 20, 30],
         "base_grid_pct": [0.008, 0.010, 0.012, 0.015],
@@ -145,16 +61,22 @@ def build_param_space() -> dict[str, list]:
         "take_profit_grid": [0.6, 0.8, 1.0],
         "stop_loss_grid": [1.2, 1.6, 2.0],
         "max_holding_days": [15, 25, 35],
-        "cooldown_days": [0, 1, 2],
+        "cooldown_days": [1],
         "min_signal_strength": [0.30, 0.45, 0.60],
         "position_size": [i / 100 for i in range(0, 101)],
         "position_sizing_coef": [10.0, 20.0, 30.0, 40.0, 60.0],
     }
 
 
+def build_fixed_polyfit_param_space(fit_window_days: int, base_param_space: dict[str, list] | None = None) -> dict[str, list]:
+    param_space = dict((base_param_space or build_param_space()).items())
+    param_space["fit_window_days"] = [int(fit_window_days)]
+    return param_space
+
+
 def build_ma_param_space() -> dict[str, list]:
     return {
-        "ma_window_days": [5, 10, 30, 60],
+        "ma_window_days": [60],
         "trend_window_days": [5, 10, 15, 20],
         "vol_window_days": [5, 10, 15, 20, 30],
         "base_grid_pct": [0.008, 0.010, 0.012, 0.015],
@@ -171,84 +93,10 @@ def build_ma_param_space() -> dict[str, list]:
     }
 
 
-def build_launch_param_space() -> dict[str, list]:
-    return {
-        "fast_ema_window": [6, 10, 15, 20],
-        "slow_ema_window": [20, 30, 45, 60],
-        "trend_slope_window": [5, 10, 20, 30],
-        "breakout_window": [8, 12, 20, 30, 40],
-        "exit_window": [5, 10, 15],
-        "atr_window": [10, 14, 20],
-        "volume_window": [5, 10, 20],
-        "short_vol_window": [5, 10],
-        "long_vol_window": [20, 40],
-        "breakout_buffer_atr": [-0.10, 0.0, 0.10, 0.20],
-        "min_trend_slope": [-0.0010, -0.0005, 0.0, 0.0005],
-        "min_breakout_return": [0.0, 0.003, 0.006, 0.010],
-        "min_close_strength": [0.35, 0.50, 0.60, 0.70],
-        "min_volume_ratio": [0.5, 0.7, 0.9, 1.1],
-        "max_compression_ratio": [0.75, 0.9, 1.05, 1.2],
-        "min_range_to_atr": [0.4, 0.6, 0.8, 1.0],
-        "min_continuation_return": [0.0, 0.001, 0.002, 0.004],
-        "min_continuation_volume_ratio": [0.5, 0.7, 0.9, 1.1],
-        "initial_stop_atr_mult": [1.2, 1.5, 1.8, 2.2],
-        "trailing_atr_mult": [1.8, 2.2, 2.6, 3.0],
-        "max_holding_days": [15, 25, 35],
-        "position_size": [0.3, 0.5, 0.7, 0.9],
-    }
-
-
-def build_retest_param_space() -> dict[str, list]:
-    return {
-        "fast_ema_window": [10, 15, 20],
-        "slow_ema_window": [30, 45, 60],
-        "trend_slope_window": [10, 20, 30],
-        "breakout_window": [20, 30, 40, 60],
-        "exit_window": [5, 10, 15],
-        "atr_window": [10, 14, 20],
-        "volume_window": [5, 10, 20],
-        "short_vol_window": [5, 10],
-        "long_vol_window": [20, 40],
-        "breakout_buffer_atr": [0.0, 0.1, 0.15, 0.25],
-        "retest_tolerance_atr": [0.3, 0.6, 0.9],
-        "retest_window_days": [3, 5, 8, 12],
-        "min_trend_slope": [0.0, 0.0005, 0.0010],
-        "min_breakout_volume_ratio": [0.8, 1.0, 1.2, 1.5],
-        "min_retest_volume_ratio": [0.6, 0.8, 1.0],
-        "max_setup_compression_ratio": [0.75, 0.9, 1.05, 1.2],
-        "min_breakout_range_to_atr": [0.6, 0.8, 1.0],
-        "max_extension_pct": [0.03, 0.05, 0.08],
-        "initial_stop_atr_mult": [1.2, 1.5, 1.8],
-        "trailing_atr_mult": [1.8, 2.2, 2.6],
-        "max_holding_days": [15, 25, 35],
-        "position_size": [0.3, 0.5, 0.7, 0.9],
-    }
-
-
-def build_event_param_space() -> dict[str, list]:
-    return {
-        "fast_ema_window": [10, 15, 20],
-        "slow_ema_window": [30, 45, 60],
-        "trend_slope_window": [10, 20, 30],
-        "breakout_window": [10, 20, 30, 40],
-        "exit_window": [5, 10, 15],
-        "atr_window": [10, 14, 20],
-        "volume_window": [5, 10, 20],
-        "short_vol_window": [5, 10],
-        "long_vol_window": [20, 40],
-        "min_gap_return": [0.0, 0.003, 0.007],
-        "min_event_return": [0.005, 0.008, 0.012, 0.015],
-        "min_close_strength": [0.45, 0.55, 0.65],
-        "min_volume_ratio": [0.8, 1.0, 1.3, 1.6],
-        "max_compression_ratio": [0.7, 0.85, 1.0, 1.2],
-        "min_range_to_atr": [0.6, 0.8, 1.0, 1.2],
-        "min_trend_slope": [-0.001, 0.0, 0.0005],
-        "max_extension_pct": [0.05, 0.08, 0.12],
-        "initial_stop_atr_mult": [1.0, 1.4, 1.8],
-        "trailing_atr_mult": [1.8, 2.2, 2.6],
-        "max_holding_days": [10, 15, 20, 25],
-        "position_size": [0.3, 0.5, 0.7, 0.9],
-    }
+def build_fixed_ma_param_space(ma_window_days: int, base_param_space: dict[str, list] | None = None) -> dict[str, list]:
+    param_space = dict((base_param_space or build_ma_param_space()).items())
+    param_space["ma_window_days"] = [int(ma_window_days)]
+    return param_space
 
 
 def build_optimized_params() -> dict[str, float | int]:
@@ -289,89 +137,9 @@ def build_ma_optimized_params() -> dict[str, float | int]:
     }
 
 
-def build_launch_optimized_params() -> dict[str, float | int]:
-    return {
-        "fast_ema_window": 15,
-        "slow_ema_window": 45,
-        "trend_slope_window": 20,
-        "breakout_window": 30,
-        "exit_window": 10,
-        "atr_window": 14,
-        "volume_window": 10,
-        "short_vol_window": 5,
-        "long_vol_window": 20,
-        "breakout_buffer_atr": 0.15,
-        "min_trend_slope": 0.0005,
-        "min_breakout_return": 0.012,
-        "min_close_strength": 0.6,
-        "min_volume_ratio": 1.2,
-        "max_compression_ratio": 0.85,
-        "min_range_to_atr": 1.1,
-        "min_continuation_return": 0.002,
-        "min_continuation_volume_ratio": 0.8,
-        "initial_stop_atr_mult": 1.5,
-        "trailing_atr_mult": 2.2,
-        "max_holding_days": 25,
-        "position_size": 0.5,
-    }
-
-
-def build_retest_optimized_params() -> dict[str, float | int]:
-    return {
-        "fast_ema_window": 15,
-        "slow_ema_window": 45,
-        "trend_slope_window": 20,
-        "breakout_window": 30,
-        "exit_window": 10,
-        "atr_window": 14,
-        "volume_window": 10,
-        "short_vol_window": 5,
-        "long_vol_window": 20,
-        "breakout_buffer_atr": 0.1,
-        "retest_tolerance_atr": 0.6,
-        "retest_window_days": 8,
-        "min_trend_slope": 0.0005,
-        "min_breakout_volume_ratio": 1.2,
-        "min_retest_volume_ratio": 0.9,
-        "max_setup_compression_ratio": 0.85,
-        "min_breakout_range_to_atr": 1.0,
-        "max_extension_pct": 0.05,
-        "initial_stop_atr_mult": 1.5,
-        "trailing_atr_mult": 2.2,
-        "max_holding_days": 25,
-        "position_size": 0.5,
-    }
-
-
-def build_event_optimized_params() -> dict[str, float | int]:
-    return {
-        "fast_ema_window": 15,
-        "slow_ema_window": 45,
-        "trend_slope_window": 20,
-        "breakout_window": 20,
-        "exit_window": 10,
-        "atr_window": 14,
-        "volume_window": 10,
-        "short_vol_window": 5,
-        "long_vol_window": 20,
-        "min_gap_return": 0.01,
-        "min_event_return": 0.015,
-        "min_close_strength": 0.65,
-        "min_volume_ratio": 1.5,
-        "max_compression_ratio": 0.7,
-        "min_range_to_atr": 1.2,
-        "min_trend_slope": -0.001,
-        "max_extension_pct": 0.08,
-        "initial_stop_atr_mult": 1.4,
-        "trailing_atr_mult": 2.0,
-        "max_holding_days": 20,
-        "position_size": 0.5,
-    }
-
-
 def _valid_param_set(params: dict) -> bool:
     return (
-        params["fit_window_days"] >= 252
+        params["fit_window_days"] >= 5
         and params["trend_window_days"] >= 5
         and params["vol_window_days"] >= 2
         and params["base_grid_pct"] > 0
@@ -403,82 +171,6 @@ def _valid_ma_param_set(params: dict) -> bool:
         and params["min_signal_strength"] >= 0
         and 0 <= params["position_size"] <= 1
         and params["position_sizing_coef"] > 0
-    )
-
-
-def _valid_launch_param_set(params: dict) -> bool:
-    return (
-        params["slow_ema_window"] > params["fast_ema_window"]
-        and params["long_vol_window"] > params["short_vol_window"]
-        and params["breakout_window"] >= params["fast_ema_window"]
-        and params["breakout_window"] > params["exit_window"]
-        and params["exit_window"] >= 3
-        and params["trend_slope_window"] >= 3
-        and params["atr_window"] >= 2
-        and params["volume_window"] >= 2
-        and params["breakout_buffer_atr"] >= 0
-        and params["min_trend_slope"] >= 0
-        and params["min_breakout_return"] > 0
-        and 0 < params["min_close_strength"] <= 1
-        and params["min_volume_ratio"] > 0
-        and params["max_compression_ratio"] > 0
-        and params["min_range_to_atr"] > 0
-        and params["min_continuation_return"] >= 0
-        and params["min_continuation_volume_ratio"] > 0
-        and params["initial_stop_atr_mult"] > 0
-        and params["trailing_atr_mult"] > 0
-        and params["max_holding_days"] >= 5
-        and 0 <= params["position_size"] <= 1
-    )
-
-
-def _valid_retest_param_set(params: dict) -> bool:
-    return (
-        params["slow_ema_window"] > params["fast_ema_window"]
-        and params["long_vol_window"] > params["short_vol_window"]
-        and params["breakout_window"] >= params["fast_ema_window"]
-        and params["breakout_window"] > params["exit_window"]
-        and params["exit_window"] >= 3
-        and params["trend_slope_window"] >= 3
-        and params["atr_window"] >= 2
-        and params["volume_window"] >= 2
-        and params["breakout_buffer_atr"] >= 0
-        and params["retest_tolerance_atr"] >= 0
-        and params["retest_window_days"] >= 2
-        and params["min_trend_slope"] >= 0
-        and params["min_breakout_volume_ratio"] > 0
-        and params["min_retest_volume_ratio"] > 0
-        and params["max_setup_compression_ratio"] > 0
-        and params["min_breakout_range_to_atr"] > 0
-        and params["max_extension_pct"] > 0
-        and params["initial_stop_atr_mult"] > 0
-        and params["trailing_atr_mult"] > 0
-        and params["max_holding_days"] >= 5
-        and 0 <= params["position_size"] <= 1
-    )
-
-
-def _valid_event_param_set(params: dict) -> bool:
-    return (
-        params["slow_ema_window"] > params["fast_ema_window"]
-        and params["long_vol_window"] > params["short_vol_window"]
-        and params["breakout_window"] >= params["fast_ema_window"]
-        and params["breakout_window"] > params["exit_window"]
-        and params["exit_window"] >= 3
-        and params["trend_slope_window"] >= 3
-        and params["atr_window"] >= 2
-        and params["volume_window"] >= 2
-        and params["min_gap_return"] >= 0
-        and params["min_event_return"] > 0
-        and 0 < params["min_close_strength"] <= 1
-        and params["min_volume_ratio"] > 0
-        and params["max_compression_ratio"] > 0
-        and params["min_range_to_atr"] > 0
-        and params["max_extension_pct"] > 0
-        and params["initial_stop_atr_mult"] > 0
-        and params["trailing_atr_mult"] > 0
-        and params["max_holding_days"] >= 5
-        and 0 <= params["position_size"] <= 1
     )
 
 
@@ -562,13 +254,14 @@ def configure_chinese_font() -> None:
         "Microsoft YaHei",
         "SimHei",
         "Noto Sans CJK SC",
+        "Arial Unicode MS",
         "WenQuanYi Zen Hei",
     ]
     available = {f.name for f in font_manager.fontManager.ttflist}
-    chosen = next((name for name in candidates if name in available), None)
+    fallbacks = [name for name in candidates if name in available]
 
-    if chosen:
-        plt.rcParams["font.sans-serif"] = [chosen, "DejaVu Sans"]
+    if fallbacks:
+        plt.rcParams["font.sans-serif"] = [*fallbacks, "DejaVu Sans"]
     else:
         plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
     plt.rcParams["axes.unicode_minus"] = False
@@ -632,10 +325,12 @@ def add_strategy_features(
     data = df.copy()
     close = data["Close"].to_numpy(dtype=float)
     n = len(data)
-    if n < 252:
+    if n < 5:
         return data.iloc[0:0].copy()
 
-    effective_fit_window = min(max(int(fit_window_days), 252), n)
+    trend_min_periods = max(3, int(trend_window_days) // 2)
+    max_fit_window = max(5, n - trend_min_periods - 1)
+    effective_fit_window = min(max(int(fit_window_days), 5), max_fit_window)
 
     pred = np.full(n, np.nan, dtype=float)
     slope = np.full(n, np.nan, dtype=float)
@@ -697,73 +392,6 @@ def add_ma_strategy_features(
     ).std(ddof=0)
 
     feature_cols = ["MABase", "MADevPct", "MADevTrend", "RollingVolPct"]
-    return data.dropna(subset=feature_cols)
-
-
-def add_momentum_features(
-    df: pd.DataFrame,
-    fast_ema_window: int,
-    slow_ema_window: int,
-    trend_slope_window: int,
-    breakout_window: int,
-    exit_window: int,
-    atr_window: int,
-    volume_window: int,
-    short_vol_window: int,
-    long_vol_window: int,
-) -> pd.DataFrame:
-    data = df.copy()
-    data["PrevClose"] = data["Close"].shift(1)
-    data["DailyReturn"] = data["Close"].pct_change()
-    data["GapReturn"] = data["Open"] / data["PrevClose"] - 1.0
-    data["FastEMA"] = data["Close"].ewm(
-        span=max(2, int(fast_ema_window)),
-        adjust=False,
-        min_periods=max(2, int(fast_ema_window)),
-    ).mean()
-    data["SlowEMA"] = data["Close"].ewm(
-        span=max(2, int(slow_ema_window)),
-        adjust=False,
-        min_periods=max(2, int(slow_ema_window)),
-    ).mean()
-    data["TrendSlope"] = data["FastEMA"].pct_change(periods=max(2, int(trend_slope_window)))
-    data["BreakoutHigh"] = data["High"].shift(1).rolling(
-        window=max(2, int(breakout_window)),
-        min_periods=max(2, int(breakout_window)),
-    ).max()
-    data["ExitLow"] = data["Low"].shift(1).rolling(
-        window=max(2, int(exit_window)),
-        min_periods=max(2, int(exit_window)),
-    ).min()
-    tr = pd.concat(
-        [
-            (data["High"] - data["Low"]).abs(),
-            (data["High"] - data["PrevClose"]).abs(),
-            (data["Low"] - data["PrevClose"]).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    data["ATR"] = tr.rolling(window=max(2, int(atr_window)), min_periods=max(2, int(atr_window))).mean()
-    data["VolumeMA"] = data["Volume"].rolling(window=max(2, int(volume_window)), min_periods=max(2, int(volume_window))).mean()
-    data["VolumeRatio"] = data["Volume"] / data["VolumeMA"]
-    short_vol = data["DailyReturn"].rolling(window=max(2, int(short_vol_window)), min_periods=max(2, int(short_vol_window))).std(ddof=0)
-    long_vol = data["DailyReturn"].rolling(window=max(3, int(long_vol_window)), min_periods=max(3, int(long_vol_window))).std(ddof=0)
-    data["CompressionRatio"] = short_vol / long_vol.replace(0, np.nan)
-    data["RangeToATR"] = (data["High"] - data["Low"]) / data["ATR"].replace(0, np.nan)
-    feature_cols = [
-        "PrevClose",
-        "DailyReturn",
-        "GapReturn",
-        "FastEMA",
-        "SlowEMA",
-        "TrendSlope",
-        "BreakoutHigh",
-        "ExitLow",
-        "ATR",
-        "VolumeRatio",
-        "CompressionRatio",
-        "RangeToATR",
-    ]
     return data.dropna(subset=feature_cols)
 
 
@@ -894,167 +522,6 @@ def _extract_ending_position(stats: pd.Series) -> float:
     strategy_obj = stats.get("_strategy")
     ending = getattr(strategy_obj, "ending_position", 0.0)
     return float(np.clip(ending, 0.0, 1.0))
-
-
-def run_launch_strategy_backtest(
-    base_data: pd.DataFrame,
-    params: dict,
-    warmup_data: pd.DataFrame | None = None,
-) -> tuple[pd.Series, pd.DataFrame]:
-    if warmup_data is not None and len(warmup_data) > 0:
-        raw = pd.concat([warmup_data, base_data]).sort_index()
-        raw = raw.loc[~raw.index.duplicated(keep="last")]
-    else:
-        raw = base_data
-
-    featured = add_momentum_features(
-        raw,
-        int(params["fast_ema_window"]),
-        int(params["slow_ema_window"]),
-        int(params["trend_slope_window"]),
-        int(params["breakout_window"]),
-        int(params["exit_window"]),
-        int(params["atr_window"]),
-        int(params["volume_window"]),
-        int(params["short_vol_window"]),
-        int(params["long_vol_window"]),
-    )
-    bt_data = featured.loc[(featured.index >= base_data.index[0]) & (featured.index <= base_data.index[-1])].copy()
-    if bt_data.empty:
-        raise ValueError("启动突破策略验证区间在特征计算后为空，请检查预热样本长度")
-
-    bt = Backtest(
-        bt_data,
-        LaunchBreakoutMomentumStrategy,
-        cash=100000,
-        commission=0.0001,
-        exclusive_orders=True,
-        finalize_trades=True,
-    )
-    kwargs = {
-        "breakout_buffer_atr": float(params["breakout_buffer_atr"]),
-        "min_trend_slope": float(params["min_trend_slope"]),
-        "min_breakout_return": float(params["min_breakout_return"]),
-        "min_close_strength": float(params["min_close_strength"]),
-        "min_volume_ratio": float(params["min_volume_ratio"]),
-        "max_compression_ratio": float(params["max_compression_ratio"]),
-        "min_range_to_atr": float(params["min_range_to_atr"]),
-        "min_continuation_return": float(params["min_continuation_return"]),
-        "min_continuation_volume_ratio": float(params["min_continuation_volume_ratio"]),
-        "initial_stop_atr_mult": float(params["initial_stop_atr_mult"]),
-        "trailing_atr_mult": float(params["trailing_atr_mult"]),
-        "max_holding_days": int(params["max_holding_days"]),
-        "position_size": float(params["position_size"]),
-    }
-    stats = bt.run(**kwargs)
-    return stats, bt_data
-
-
-def run_retest_strategy_backtest(
-    base_data: pd.DataFrame,
-    params: dict,
-    warmup_data: pd.DataFrame | None = None,
-) -> tuple[pd.Series, pd.DataFrame]:
-    if warmup_data is not None and len(warmup_data) > 0:
-        raw = pd.concat([warmup_data, base_data]).sort_index()
-        raw = raw.loc[~raw.index.duplicated(keep="last")]
-    else:
-        raw = base_data
-
-    featured = add_momentum_features(
-        raw,
-        int(params["fast_ema_window"]),
-        int(params["slow_ema_window"]),
-        int(params["trend_slope_window"]),
-        int(params["breakout_window"]),
-        int(params["exit_window"]),
-        int(params["atr_window"]),
-        int(params["volume_window"]),
-        int(params["short_vol_window"]),
-        int(params["long_vol_window"]),
-    )
-    bt_data = featured.loc[(featured.index >= base_data.index[0]) & (featured.index <= base_data.index[-1])].copy()
-    if bt_data.empty:
-        raise ValueError("突破回踩确认策略验证区间在特征计算后为空，请检查预热样本长度")
-
-    bt = Backtest(
-        bt_data,
-        BreakoutRetestMomentumStrategy,
-        cash=100000,
-        commission=0.0001,
-        exclusive_orders=True,
-        finalize_trades=True,
-    )
-    kwargs = {
-        "breakout_buffer_atr": float(params["breakout_buffer_atr"]),
-        "retest_tolerance_atr": float(params["retest_tolerance_atr"]),
-        "retest_window_days": int(params["retest_window_days"]),
-        "min_trend_slope": float(params["min_trend_slope"]),
-        "min_breakout_volume_ratio": float(params["min_breakout_volume_ratio"]),
-        "min_retest_volume_ratio": float(params["min_retest_volume_ratio"]),
-        "max_setup_compression_ratio": float(params["max_setup_compression_ratio"]),
-        "min_breakout_range_to_atr": float(params["min_breakout_range_to_atr"]),
-        "max_extension_pct": float(params["max_extension_pct"]),
-        "initial_stop_atr_mult": float(params["initial_stop_atr_mult"]),
-        "trailing_atr_mult": float(params["trailing_atr_mult"]),
-        "max_holding_days": int(params["max_holding_days"]),
-        "position_size": float(params["position_size"]),
-    }
-    stats = bt.run(**kwargs)
-    return stats, bt_data
-
-
-def run_event_strategy_backtest(
-    base_data: pd.DataFrame,
-    params: dict,
-    warmup_data: pd.DataFrame | None = None,
-) -> tuple[pd.Series, pd.DataFrame]:
-    if warmup_data is not None and len(warmup_data) > 0:
-        raw = pd.concat([warmup_data, base_data]).sort_index()
-        raw = raw.loc[~raw.index.duplicated(keep="last")]
-    else:
-        raw = base_data
-
-    featured = add_momentum_features(
-        raw,
-        int(params["fast_ema_window"]),
-        int(params["slow_ema_window"]),
-        int(params["trend_slope_window"]),
-        int(params["breakout_window"]),
-        int(params["exit_window"]),
-        int(params["atr_window"]),
-        int(params["volume_window"]),
-        int(params["short_vol_window"]),
-        int(params["long_vol_window"]),
-    )
-    bt_data = featured.loc[(featured.index >= base_data.index[0]) & (featured.index <= base_data.index[-1])].copy()
-    if bt_data.empty:
-        raise ValueError("事件型启动策略验证区间在特征计算后为空，请检查预热样本长度")
-
-    bt = Backtest(
-        bt_data,
-        EventDrivenLaunchStrategy,
-        cash=100000,
-        commission=0.0001,
-        exclusive_orders=True,
-        finalize_trades=True,
-    )
-    kwargs = {
-        "min_gap_return": float(params["min_gap_return"]),
-        "min_event_return": float(params["min_event_return"]),
-        "min_close_strength": float(params["min_close_strength"]),
-        "min_volume_ratio": float(params["min_volume_ratio"]),
-        "max_compression_ratio": float(params["max_compression_ratio"]),
-        "min_range_to_atr": float(params["min_range_to_atr"]),
-        "min_trend_slope": float(params["min_trend_slope"]),
-        "max_extension_pct": float(params["max_extension_pct"]),
-        "initial_stop_atr_mult": float(params["initial_stop_atr_mult"]),
-        "trailing_atr_mult": float(params["trailing_atr_mult"]),
-        "max_holding_days": int(params["max_holding_days"]),
-        "position_size": float(params["position_size"]),
-    }
-    stats = bt.run(**kwargs)
-    return stats, bt_data
 
 
 def scan_parameters(
@@ -1220,357 +687,6 @@ def scan_ma_parameters(
     return best, result_df
 
 
-def _scan_momentum_parameters(
-    base_data: pd.DataFrame,
-    param_space: dict[str, list],
-    validator,
-    strategy_cls,
-    feature_label: str,
-    feature_param_names: tuple[str, ...],
-    strategy_only_param_names: tuple[str, ...],
-    max_evals: int = 800,
-    random_seed: int = 42,
-) -> tuple[dict, pd.DataFrame]:
-    selected = _sample_param_combinations_with_validator(
-        param_space,
-        max_evals=max_evals,
-        random_seed=random_seed,
-        validator=validator,
-    )
-
-    feature_cache: dict[tuple[int, ...], pd.DataFrame] = {}
-    results = []
-    start = time.time()
-
-    for i, params in enumerate(selected, start=1):
-        key = tuple(int(params[name]) for name in feature_param_names)
-        if key not in feature_cache:
-            feature_cache[key] = add_momentum_features(base_data, key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8])
-
-        bt_data = feature_cache[key]
-        if bt_data.empty:
-            continue
-
-        bt = Backtest(
-            bt_data,
-            strategy_cls,
-            cash=100000,
-            commission=0.0001,
-            exclusive_orders=True,
-            finalize_trades=True,
-        )
-        strategy_kwargs = {name: params[name] for name in strategy_only_param_names}
-        stats = bt.run(**strategy_kwargs)
-        results.append(
-            {
-                **params,
-                "Return [%]": float(stats["Return [%]"]),
-                "Return (Ann.) [%]": float(stats["Return (Ann.) [%]"]),
-                "Max. Drawdown [%]": float(stats["Max. Drawdown [%]"]),
-                "# Trades": int(stats["# Trades"]),
-            }
-        )
-
-        if i % 200 == 0 or i == len(selected):
-            elapsed = time.time() - start
-            print(f"{feature_label}训练集扫描进度: {i}/{len(selected)}，耗时 {elapsed:.1f}s")
-
-    result_df = pd.DataFrame(results)
-    if result_df.empty:
-        raise ValueError(f"{feature_label}训练参数扫描结果为空")
-
-    buy_hold_total = float(base_data["Close"].iloc[-1] / base_data["Close"].iloc[0] - 1)
-    years = max(len(base_data) / 252.0, 1e-9)
-    buy_hold_ann = float((1 + buy_hold_total) ** (1 / years) - 1) * 100
-    min_trades_target = max(3, int(np.ceil(years * 2.0)))
-    result_df["TradeFreq"] = result_df["# Trades"] / years
-    result_df["ExcessAnn"] = result_df["Return (Ann.) [%]"] - buy_hold_ann
-    size_denom = result_df["position_size"].clip(lower=0.3)
-    result_df["PositionAdjAnn"] = result_df["Return (Ann.) [%]"] / size_denom
-    result_df["PositionAdjExcessAnn"] = result_df["ExcessAnn"] / size_denom
-    result_df["UndertradePenalty"] = np.maximum(min_trades_target - result_df["# Trades"], 0.0)
-    result_df["OvertradePenalty"] = np.maximum(result_df["TradeFreq"] - 10.0, 0.0)
-    result_df["Score"] = (
-        result_df["PositionAdjAnn"]
-        + 0.70 * result_df["PositionAdjExcessAnn"]
-        - 0.55 * result_df["Max. Drawdown [%]"].abs()
-        + 0.25 * np.minimum(result_df["TradeFreq"], 8.0)
-        - 1.20 * result_df["UndertradePenalty"]
-        - 0.60 * result_df["OvertradePenalty"]
-    )
-    result_df.loc[result_df["# Trades"] < min_trades_target, "Score"] -= 12.0
-    result_df.loc[result_df["Return (Ann.) [%]"] < 6.0, "Score"] -= 4.0
-    result_df.loc[result_df["Max. Drawdown [%]"].abs() > 18.0, "Score"] -= 5.0
-
-    eligible = result_df[result_df["# Trades"] >= min_trades_target]
-    if not eligible.empty:
-        result_df = eligible.copy()
-
-    result_df = result_df.sort_values(["Score", "Return [%]"], ascending=[False, False]).reset_index(drop=True)
-    best = result_df.iloc[0].to_dict()
-    return best, result_df
-
-
-def scan_launch_parameters(
-    base_data: pd.DataFrame,
-    param_space: dict[str, list],
-    max_evals: int = 800,
-    random_seed: int = 42,
-) -> tuple[dict, pd.DataFrame]:
-    return _scan_momentum_parameters(
-        base_data=base_data,
-        param_space=param_space,
-        validator=_valid_launch_param_set,
-        strategy_cls=LaunchBreakoutMomentumStrategy,
-        feature_label="启动突破策略",
-        feature_param_names=(
-            "fast_ema_window",
-            "slow_ema_window",
-            "trend_slope_window",
-            "breakout_window",
-            "exit_window",
-            "atr_window",
-            "volume_window",
-            "short_vol_window",
-            "long_vol_window",
-        ),
-        strategy_only_param_names=(
-            "breakout_buffer_atr",
-            "min_trend_slope",
-            "min_breakout_return",
-            "min_close_strength",
-            "min_volume_ratio",
-            "max_compression_ratio",
-            "min_range_to_atr",
-            "min_continuation_return",
-            "min_continuation_volume_ratio",
-            "initial_stop_atr_mult",
-            "trailing_atr_mult",
-            "max_holding_days",
-            "position_size",
-        ),
-        max_evals=max_evals,
-        random_seed=random_seed,
-    )
-
-
-def _evaluate_launch_params_on_periods(
-    base_data: pd.DataFrame,
-    params: dict,
-    periods: list[tuple[str, str]],
-    warmup_days: int = 360,
-) -> tuple[float, int, list[dict]]:
-    detail_rows: list[dict] = []
-    total_score = 0.0
-    hit_count = 0
-
-    for start_str, end_str in periods:
-        start = pd.Timestamp(start_str)
-        end = pd.Timestamp(end_str)
-        period_df = base_data.loc[(base_data.index >= start) & (base_data.index <= end)]
-        if period_df.empty:
-            detail_rows.append(
-                {
-                    "period": f"{start_str}~{end_str}",
-                    "trades": 0,
-                    "strategy_ret": np.nan,
-                    "benchmark_ret": np.nan,
-                    "period_score": -5.0,
-                    "hit": 0,
-                }
-            )
-            total_score -= 5.0
-            continue
-
-        warmup_start = period_df.index[0] - pd.Timedelta(days=warmup_days)
-        warmup_df = base_data.loc[(base_data.index >= warmup_start) & (base_data.index < period_df.index[0])]
-
-        try:
-            stats, _ = run_launch_strategy_backtest(period_df, params, warmup_data=warmup_df)
-            strat_ret = float(stats["Return [%]"]) / 100.0
-            trades = int(stats["# Trades"])
-        except Exception:
-            strat_ret = -1.0
-            trades = 0
-
-        bench = period_df["Close"].dropna()
-        bench_ret = float(bench.iloc[-1] / bench.iloc[0] - 1) if len(bench) >= 2 else 0.0
-
-        # "跟踪到"定义为：该窗口有交易（先确保参与），收益作为次级优化目标。
-        hit = int(trades > 0)
-        hit_count += hit
-
-        period_score = 0.0
-        if trades == 0:
-            period_score -= 5.0
-        else:
-            period_score += 2.0
-        if strat_ret >= 0:
-            period_score += 2.0
-        if bench_ret > 0:
-            period_score += 4.0 * (strat_ret - 0.10 * bench_ret)
-            if strat_ret >= 0.20 * bench_ret:
-                period_score += 2.0
-        else:
-            period_score += 2.0 * strat_ret
-        if hit:
-            period_score += 5.0
-
-        detail_rows.append(
-            {
-                "period": f"{start_str}~{end_str}",
-                "trades": trades,
-                "strategy_ret": strat_ret,
-                "benchmark_ret": bench_ret,
-                "period_score": period_score,
-                "hit": hit,
-            }
-        )
-        total_score += period_score
-
-    # 强化命中数量优先级
-    total_score += 6.0 * hit_count
-    if hit_count < len(periods):
-        total_score -= 3.0 * (len(periods) - hit_count)
-
-    return total_score, hit_count, detail_rows
-
-
-def optimize_launch_for_target_periods(
-    base_data: pd.DataFrame,
-    param_space: dict[str, list],
-    periods: list[tuple[str, str]],
-    max_evals: int = 600,
-    random_seed: int = 2026,
-) -> dict:
-    selected = _sample_param_combinations_with_validator(
-        param_space,
-        max_evals=max_evals,
-        random_seed=random_seed,
-        validator=_valid_launch_param_set,
-    )
-
-    best_params: dict | None = None
-    best_score = -np.inf
-    best_hit_count = -1
-
-    for i, params in enumerate(selected, start=1):
-        score, hit_count, _ = _evaluate_launch_params_on_periods(base_data, params, periods)
-        if (hit_count > best_hit_count) or (hit_count == best_hit_count and score > best_score):
-            best_hit_count = hit_count
-            best_score = score
-            best_params = dict(params)
-
-        if i % 200 == 0 or i == len(selected):
-            print(
-                f"启动突破定向优化进度: {i}/{len(selected)}，"
-                f"当前最优命中 {best_hit_count}/{len(periods)}，分数 {best_score:.2f}"
-            )
-
-    if best_params is None:
-        raise ValueError("未找到可用的启动突破定向参数")
-
-    final_score, final_hit, detail = _evaluate_launch_params_on_periods(base_data, best_params, periods)
-    print("\n===== 启动突破定向优化结果 =====")
-    print(f"目标周期命中数: {final_hit}/{len(periods)}")
-    print(f"目标评分: {final_score:.2f}")
-    for row in detail:
-        strat_ret = row["strategy_ret"]
-        bench_ret = row["benchmark_ret"]
-        s_txt = "nan" if pd.isna(strat_ret) else f"{strat_ret * 100:.2f}%"
-        b_txt = "nan" if pd.isna(bench_ret) else f"{bench_ret * 100:.2f}%"
-        print(
-            f"{row['period']} | trades={row['trades']} | 策略={s_txt} | 基准={b_txt} | hit={row['hit']}"
-        )
-
-    return best_params
-
-
-def scan_retest_parameters(
-    base_data: pd.DataFrame,
-    param_space: dict[str, list],
-    max_evals: int = 800,
-    random_seed: int = 42,
-) -> tuple[dict, pd.DataFrame]:
-    return _scan_momentum_parameters(
-        base_data=base_data,
-        param_space=param_space,
-        validator=_valid_retest_param_set,
-        strategy_cls=BreakoutRetestMomentumStrategy,
-        feature_label="突破回踩确认策略",
-        feature_param_names=(
-            "fast_ema_window",
-            "slow_ema_window",
-            "trend_slope_window",
-            "breakout_window",
-            "exit_window",
-            "atr_window",
-            "volume_window",
-            "short_vol_window",
-            "long_vol_window",
-        ),
-        strategy_only_param_names=(
-            "breakout_buffer_atr",
-            "retest_tolerance_atr",
-            "retest_window_days",
-            "min_trend_slope",
-            "min_breakout_volume_ratio",
-            "min_retest_volume_ratio",
-            "max_setup_compression_ratio",
-            "min_breakout_range_to_atr",
-            "max_extension_pct",
-            "initial_stop_atr_mult",
-            "trailing_atr_mult",
-            "max_holding_days",
-            "position_size",
-        ),
-        max_evals=max_evals,
-        random_seed=random_seed,
-    )
-
-
-def scan_event_parameters(
-    base_data: pd.DataFrame,
-    param_space: dict[str, list],
-    max_evals: int = 800,
-    random_seed: int = 42,
-) -> tuple[dict, pd.DataFrame]:
-    return _scan_momentum_parameters(
-        base_data=base_data,
-        param_space=param_space,
-        validator=_valid_event_param_set,
-        strategy_cls=EventDrivenLaunchStrategy,
-        feature_label="事件型启动策略",
-        feature_param_names=(
-            "fast_ema_window",
-            "slow_ema_window",
-            "trend_slope_window",
-            "breakout_window",
-            "exit_window",
-            "atr_window",
-            "volume_window",
-            "short_vol_window",
-            "long_vol_window",
-        ),
-        strategy_only_param_names=(
-            "min_gap_return",
-            "min_event_return",
-            "min_close_strength",
-            "min_volume_ratio",
-            "max_compression_ratio",
-            "min_range_to_atr",
-            "min_trend_slope",
-            "max_extension_pct",
-            "initial_stop_atr_mult",
-            "trailing_atr_mult",
-            "max_holding_days",
-            "position_size",
-        ),
-        max_evals=max_evals,
-        random_seed=random_seed,
-    )
-
-
 def calc_independent_annual_returns(series: pd.Series) -> pd.Series:
     clean = series.dropna()
     annual_ret = clean.resample("YE").apply(lambda x: x.iloc[-1] / x.iloc[0] - 1)
@@ -1584,6 +700,7 @@ def plot_annual_return_comparison(
     title: str,
     output_path: Path,
 ) -> pd.DataFrame:
+    configure_chinese_font()
     strategy_annual = calc_independent_annual_returns(strategy_equity_curve["Equity"])
     buy_hold_annual = calc_independent_annual_returns(benchmark_close)
 
@@ -1609,6 +726,57 @@ def plot_annual_return_comparison(
     return compare
 
 
+def calc_daily_position_ratio(
+    strategy_equity_curve: pd.DataFrame,
+    benchmark_close: pd.Series,
+    trades: pd.DataFrame | None = None,
+) -> pd.Series:
+    index = strategy_equity_curve.index
+    position_ratio = pd.Series(0.0, index=index, dtype=float)
+    if trades is None or len(trades) == 0:
+        return position_ratio
+
+    trade_df = trades.copy()
+    trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
+    trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+    close = benchmark_close.reindex(index).ffill().bfill()
+    equity = strategy_equity_curve["Equity"].reindex(index).ffill().bfill()
+
+    for _, trade in trade_df.iterrows():
+        entry_time = pd.Timestamp(trade["EntryTime"])
+        exit_time = pd.Timestamp(trade["ExitTime"])
+        size = float(abs(trade.get("Size", 0.0)))
+        if size <= 0:
+            continue
+        active_mask = (index >= entry_time) & (index < exit_time)
+        if not active_mask.any():
+            continue
+        notional = size * close.loc[active_mask]
+        position_ratio.loc[active_mask] += notional / equity.loc[active_mask].replace(0.0, np.nan)
+
+    return position_ratio.fillna(0.0).clip(lower=0.0)
+
+
+def _title_with_year(title: str, index: pd.Index) -> str:
+    dt_index = pd.to_datetime(index)
+    start_year = int(dt_index.min().year)
+    end_year = int(dt_index.max().year)
+    year_text = f"{start_year}年" if start_year == end_year else f"{start_year}-{end_year}年"
+    return f"{year_text} {title}"
+
+
+def _configure_dense_date_axis(ax: plt.Axes, index: pd.Index) -> None:
+    dt_index = pd.to_datetime(index)
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m月"))
+    ax.set_xticks(mdates.date2num(dt_index.to_pydatetime()), minor=True)
+    ax.tick_params(axis="x", rotation=30, labelsize=9)
+    ax.tick_params(axis="x", which="minor", length=2, color="#999999")
+    ax.set_xlim(dt_index.min(), dt_index.max())
+    ax.grid(alpha=0.2, axis="x", which="major")
+    ax.grid(alpha=0.06, axis="x", which="minor")
+
+
 def plot_daily_cumulative_return_comparison(
     strategy_equity_curve: pd.DataFrame,
     benchmark_close: pd.Series,
@@ -1618,11 +786,13 @@ def plot_daily_cumulative_return_comparison(
     baseline_series: pd.Series | None = None,
     baseline_label: str = "策略基准累计收益",
 ) -> pd.DataFrame:
+    configure_chinese_font()
     strategy_daily = strategy_equity_curve["Equity"].pct_change().fillna(0.0)
     buy_hold_daily = benchmark_close.pct_change().fillna(0.0)
     strategy_cum = (1 + strategy_daily).cumprod() - 1
     buy_hold_cum = (1 + buy_hold_daily).cumprod() - 1
     compare = pd.DataFrame({"策略累计收益": strategy_cum, "长期持有累计收益": buy_hold_cum})
+    compare["策略仓位"] = calc_daily_position_ratio(strategy_equity_curve, benchmark_close, trades=trades)
 
     if baseline_series is not None:
         baseline = baseline_series.reindex(compare.index).ffill().bfill()
@@ -1630,34 +800,48 @@ def plot_daily_cumulative_return_comparison(
         baseline_cum = (1 + baseline_daily).cumprod() - 1
         compare[baseline_label] = baseline_cum
 
-    plt.figure(figsize=(14, 6))
-    plt.plot(compare.index, compare["策略累计收益"] * 100, label="策略累计收益", color="#2ca02c", linewidth=1.3)
-    plt.plot(compare.index, compare["长期持有累计收益"] * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
+    fig, (ax_main, ax_pos) = plt.subplots(
+        2,
+        1,
+        figsize=(14, 8),
+        sharex=True,
+        gridspec_kw={"height_ratios": [4, 1], "hspace": 0.05},
+    )
+    ax_main.plot(compare.index, compare["策略累计收益"] * 100, label="策略累计收益", color="#2ca02c", linewidth=1.3)
+    ax_main.plot(compare.index, compare["长期持有累计收益"] * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
     if baseline_series is not None and baseline_label in compare.columns:
-        plt.plot(compare.index, compare[baseline_label] * 100, label=baseline_label, color="#ff7f0e", linewidth=1.1, linestyle="--")
+        ax_main.plot(compare.index, compare[baseline_label] * 100, label=baseline_label, color="#ff7f0e", linewidth=1.1, linestyle="--")
 
     if trades is not None and len(trades) > 0:
         trade_df = trades.copy()
         trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
         trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
-        line = compare["策略累计收益"]
+        line = compare["长期持有累计收益"]
         entry_points = line.reindex(trade_df["EntryTime"], method="ffill").dropna()
         exit_points = line.reindex(trade_df["ExitTime"], method="ffill").dropna()
         if not entry_points.empty:
-            plt.scatter(entry_points.index, entry_points.values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
+            ax_main.scatter(entry_points.index, entry_points.values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
         if not exit_points.empty:
-            plt.scatter(exit_points.index, exit_points.values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
+            ax_main.scatter(exit_points.index, exit_points.values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
 
-    plt.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
-    plt.title(title)
-    plt.xlabel("日期")
-    plt.ylabel("累计收益率 (%)")
-    plt.legend()
-    plt.grid(alpha=0.2)
-    plt.tight_layout()
+    ax_main.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
+    ax_main.set_title(_title_with_year(title, compare.index))
+    ax_main.set_ylabel("累计收益率 (%)")
+    ax_main.legend()
+    ax_main.grid(alpha=0.2)
+
+    ax_pos.plot(compare.index, compare["策略仓位"] * 100, color="#6a9f6a", linewidth=1.0)
+    ax_pos.fill_between(compare.index, 0, compare["策略仓位"] * 100, color="#8fbf8f", alpha=0.35)
+    ax_pos.set_ylabel("仓位 (%)")
+    ax_pos.set_xlabel("日期")
+    ax_pos.grid(alpha=0.2, axis="y")
+    ax_pos.set_ylim(0, max(100.0, float(compare["策略仓位"].max() * 110.0) if not compare.empty else 100.0))
+    _configure_dense_date_axis(ax_pos, compare.index)
+
+    fig.subplots_adjust(hspace=0.08)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     return compare
 
 
@@ -1667,6 +851,7 @@ def plot_multi_strategy_cumulative_comparison(
     title: str,
     output_path: Path,
 ) -> pd.DataFrame:
+    configure_chinese_font()
     compare_data: dict[str, pd.Series] = {}
     colors = ["#2ca02c", "#d62728", "#ff7f0e", "#8c564b", "#17becf"]
     plt.figure(figsize=(14, 6))
@@ -1682,11 +867,12 @@ def plot_multi_strategy_cumulative_comparison(
     compare = pd.DataFrame(compare_data)
     plt.plot(compare.index, compare["长期持有累计收益"] * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
     plt.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
-    plt.title(title)
+    plt.title(_title_with_year(title, compare.index))
     plt.xlabel("日期")
     plt.ylabel("累计收益率 (%)")
     plt.legend()
     plt.grid(alpha=0.2)
+    _configure_dense_date_axis(plt.gca(), compare.index)
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -1740,6 +926,219 @@ def print_daily_cumulative_returns_with_signals(
         print(out.head(head_n).to_string())
         print("... (中间省略) ...")
         print(out.tail(tail_n).to_string())
+
+
+def _nearest_bar_index(index: pd.Index, ts: pd.Timestamp) -> int:
+    pos = index.get_indexer([pd.Timestamp(ts)], method="nearest")[0]
+    return max(int(pos), 0)
+
+
+def _join_reasons(reasons: list[str], fallback: str) -> str:
+    uniq = []
+    for reason in reasons:
+        if reason and reason not in uniq:
+            uniq.append(reason)
+    return "; ".join(uniq) if uniq else fallback
+
+
+def _infer_grid_entry_reason(
+    row: pd.Series,
+    params: dict,
+    base_col: str,
+    dev_col: str,
+    trend_col: str,
+) -> str:
+    close = float(row["Close"])
+    base_value = float(row[base_col])
+    dev_pct = float(row[dev_col])
+    dev_trend = float(row[trend_col])
+    rolling_vol_pct = float(row["RollingVolPct"])
+    vol_multiplier = 1.0 + float(params["volatility_scale"]) * max(rolling_vol_pct, 0.0)
+    dynamic_grid_step = float(params["base_grid_pct"]) * (1.0 + float(params["trend_sensitivity"]) * abs(dev_trend)) * vol_multiplier
+    dynamic_grid_step = max(dynamic_grid_step, float(params["base_grid_pct"]) * 0.3)
+    signal_strength = abs(dev_pct) / max(dynamic_grid_step, 1e-9)
+    entry_level = int(np.clip(np.floor(signal_strength), 1, int(params["max_grid_levels"])))
+    return (
+        f"mean_reversion_grid;base={base_value:.4f};dev={dev_pct:.4%};"
+        f"grid_step={dynamic_grid_step:.4%};level={entry_level};close={close:.4f}"
+    )
+
+
+def _infer_grid_exit_reason(
+    row: pd.Series,
+    entry_row: pd.Series,
+    params: dict,
+    dev_col: str,
+    trend_col: str,
+    holding_days: int,
+) -> str:
+    dev_pct = float(row[dev_col])
+    dev_trend = float(row[trend_col])
+    rolling_vol_pct = float(row["RollingVolPct"])
+    vol_multiplier = 1.0 + float(params["volatility_scale"]) * max(rolling_vol_pct, 0.0)
+    dynamic_grid_step = float(params["base_grid_pct"]) * (1.0 + float(params["trend_sensitivity"]) * abs(dev_trend)) * vol_multiplier
+    dynamic_grid_step = max(dynamic_grid_step, float(params["base_grid_pct"]) * 0.3)
+    entry_signal = abs(float(entry_row[dev_col])) / max(dynamic_grid_step, 1e-9)
+    entry_level = int(np.clip(np.floor(entry_signal), 1, int(params["max_grid_levels"])))
+    ref_step = max(dynamic_grid_step, float(params["base_grid_pct"]))
+    tp_threshold = entry_level * ref_step * float(params["take_profit_grid"])
+    sl_threshold = entry_level * ref_step * float(params["stop_loss_grid"])
+    reasons: list[str] = []
+    if holding_days >= int(params["max_holding_days"]):
+        reasons.append(f"max_holding_days({int(params['max_holding_days'])})")
+    if dev_pct >= tp_threshold:
+        reasons.append(f"take_profit_grid(dev={dev_pct:.4%}>=tp={tp_threshold:.4%})")
+    if dev_pct <= -sl_threshold:
+        reasons.append(f"stop_loss_grid(dev={dev_pct:.4%}<=-{sl_threshold:.4%})")
+    return _join_reasons(reasons, "grid_exit_unclassified")
+
+
+def infer_trade_record_reasons(
+    trades: pd.DataFrame | None,
+    bt_data: pd.DataFrame,
+    strategy_name: str,
+    params: dict,
+) -> pd.DataFrame:
+    if trades is None or len(trades) == 0:
+        return pd.DataFrame(columns=["EntryReason", "ExitReason"])
+
+    trade_df = trades.copy()
+    entry_reasons: list[str] = []
+    exit_reasons: list[str] = []
+    index = bt_data.index
+
+    for _, trade in trade_df.iterrows():
+        entry_bar = int(trade["EntryBar"]) if "EntryBar" in trade else _nearest_bar_index(index, pd.Timestamp(trade["EntryTime"]))
+        exit_bar = int(trade["ExitBar"]) if "ExitBar" in trade else _nearest_bar_index(index, pd.Timestamp(trade["ExitTime"]))
+        entry_bar = int(np.clip(entry_bar, 0, len(bt_data) - 1))
+        exit_bar = int(np.clip(exit_bar, 0, len(bt_data) - 1))
+        entry_row = bt_data.iloc[entry_bar]
+        exit_row = bt_data.iloc[exit_bar]
+        holding_days = exit_bar - entry_bar
+
+        if strategy_name == "polyfit":
+            entry_reason = "initial_position_carry" if entry_bar == 0 else _infer_grid_entry_reason(entry_row, params, "PolyBasePred", "PolyDevPct", "PolyDevTrend")
+            exit_reason = _infer_grid_exit_reason(exit_row, entry_row, params, "PolyDevPct", "PolyDevTrend", holding_days)
+        elif strategy_name == "ma":
+            entry_reason = "initial_position_carry" if entry_bar == 0 else _infer_grid_entry_reason(entry_row, params, "MABase", "MADevPct", "MADevTrend")
+            exit_reason = _infer_grid_exit_reason(exit_row, entry_row, params, "MADevPct", "MADevTrend", holding_days)
+        else:
+            entry_reason = "entry_unclassified"
+            exit_reason = "exit_unclassified"
+
+        entry_reasons.append(entry_reason)
+        exit_reasons.append(exit_reason)
+
+    return pd.DataFrame({"EntryReason": entry_reasons, "ExitReason": exit_reasons}, index=trade_df.index)
+
+
+def export_trade_records_csv(
+    trades: pd.DataFrame | None,
+    output_path: Path,
+    bt_data: pd.DataFrame | None = None,
+    equity_curve: pd.DataFrame | None = None,
+    strategy_name: str | None = None,
+    params: dict | None = None,
+    native_reason_records: list[dict] | None = None,
+) -> pd.DataFrame:
+    if trades is None or len(trades) == 0:
+        empty = pd.DataFrame(
+            columns=[
+                "EntryTime",
+                "ExitTime",
+                "Size",
+                "EntryPositionPct",
+                "EntryPrice",
+                "ExitPrice",
+                "PnL",
+                "ReturnPct",
+                "HoldingDays",
+                "EntryReason",
+                "ExitReason",
+            ]
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        empty.to_csv(output_path, index=False, encoding="utf-8-sig")
+        return empty
+
+    trade_df = trades.copy()
+    trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
+    trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+    trade_df["HoldingDays"] = (trade_df["ExitTime"] - trade_df["EntryTime"]).dt.days.clip(lower=1)
+    trade_df["EntryPositionPct"] = np.nan
+    if equity_curve is not None and len(equity_curve) > 0 and "EntryBar" in trade_df.columns and "Equity" in equity_curve.columns:
+        equity_values = equity_curve["Equity"].reset_index(drop=True)
+        entry_bars = trade_df["EntryBar"].fillna(-1).astype(int)
+        valid_mask = entry_bars.between(0, len(equity_values) - 1)
+        if valid_mask.any():
+            entry_equity = entry_bars.loc[valid_mask].map(equity_values)
+            entry_position_value = trade_df.loc[valid_mask, "Size"].abs() * trade_df.loc[valid_mask, "EntryPrice"]
+            trade_df.loc[valid_mask, "EntryPositionPct"] = (
+                entry_position_value / entry_equity.replace(0, np.nan)
+            )
+    if native_reason_records is not None and len(native_reason_records) > 0:
+        native_df = pd.DataFrame(native_reason_records).copy()
+        for col in ["EntryTime", "ExitTime"]:
+            if col in native_df.columns:
+                native_df[col] = pd.to_datetime(native_df[col])
+        native_keep = [col for col in ["EntryTime", "ExitTime", "EntryReason", "ExitReason"] if col in native_df.columns]
+        if {"EntryTime", "ExitTime", "EntryReason", "ExitReason"}.issubset(native_keep):
+            native_df = native_df[native_keep].drop_duplicates(subset=["EntryTime", "ExitTime"], keep="last")
+            trade_df = trade_df.merge(native_df, on=["EntryTime", "ExitTime"], how="left", suffixes=("", "_native"))
+            if "EntryReason_native" in trade_df.columns:
+                trade_df["EntryReason"] = trade_df.get("EntryReason").combine_first(trade_df["EntryReason_native"])
+                trade_df = trade_df.drop(columns=[col for col in ["EntryReason_native", "ExitReason_native"] if col in trade_df.columns])
+
+    if bt_data is not None and strategy_name is not None and params is not None:
+        reason_df = infer_trade_record_reasons(trade_df, bt_data, strategy_name, params)
+        if "EntryReason" in trade_df.columns:
+            trade_df["EntryReason"] = trade_df["EntryReason"].fillna(reason_df["EntryReason"])
+            trade_df["ExitReason"] = trade_df["ExitReason"].fillna(reason_df["ExitReason"])
+        else:
+            trade_df = pd.concat([trade_df, reason_df], axis=1)
+    output_cols = [
+        col
+        for col in [
+            "EntryTime",
+            "ExitTime",
+            "Size",
+            "EntryPositionPct",
+            "EntryPrice",
+            "ExitPrice",
+            "PnL",
+            "ReturnPct",
+            "HoldingDays",
+            "EntryReason",
+            "ExitReason",
+            "Tag",
+            "Duration",
+        ]
+        if col in trade_df.columns
+    ]
+    export_df = trade_df[output_cols].copy()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    export_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    return export_df
+
+
+def write_window_comparison_summary_markdown(
+    output_path: Path,
+    title: str,
+    sections: list[tuple[str, list[Path]]],
+) -> None:
+    lines = [f"# {title}", ""]
+    for section_title, image_paths in sections:
+        if not image_paths:
+            continue
+        lines.append(f"## {section_title}")
+        lines.append("")
+        for image_path in image_paths:
+            lines.append(f"### {image_path.stem}")
+            lines.append("")
+            lines.append(f"![{image_path.stem}]({image_path.name})")
+            lines.append("")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
 
 def summarize_backtest_metrics(stats: pd.Series, benchmark_close: pd.Series) -> dict[str, float]:
@@ -1865,6 +1264,7 @@ def run_walk_forward_validation_3y1y(
             annual_csv = reports / f"wf3y1y_{i:02d}_annual_return_comparison.csv"
             daily_csv = reports / f"wf3y1y_{i:02d}_daily_cumulative_return_comparison.csv"
             scan_csv = reports / f"wf3y1y_{i:02d}_train_scan_top50.csv"
+            trades_csv = reports / f"wf3y1y_{i:02d}_trade_records.csv"
 
             annual_df = plot_annual_return_comparison(
                 strategy_equity_curve=val_stats["_equity_curve"],
@@ -1889,6 +1289,7 @@ def run_walk_forward_validation_3y1y(
             annual_df.to_csv(annual_csv, index=True, encoding="utf-8-sig")
             daily_df.to_csv(daily_csv, index=True, encoding="utf-8-sig")
             scan_df.head(50).to_csv(scan_csv, index=False, encoding="utf-8-sig")
+            export_trade_records_csv(val_stats["_trades"], trades_csv, bt_data=val_data, equity_curve=val_stats["_equity_curve"], strategy_name="polyfit", params=best_params, native_reason_records=getattr(val_stats.get("_strategy"), "trade_reason_records", None))
 
         metrics = summarize_backtest_metrics(val_stats, val_data["Close"])
         rows.append(
@@ -1910,227 +1311,428 @@ def run_walk_forward_validation_3y1y(
     return pd.DataFrame(rows)
 
 
-def run_breakout_strategy_comparison_3y1y(
+def run_ma_walk_forward_validation_3y1y(
     base_data: pd.DataFrame,
-    polyfit_param_space: dict[str, list],
     ma_param_space: dict[str, list],
-    launch_param_space: dict[str, list],
-    retest_param_space: dict[str, list],
-    event_param_space: dict[str, list],
+    ma_window_days: int,
     max_evals: int = 800,
     random_seed: int = 42,
     generate_artifacts: bool = True,
+    print_daily: bool = True,
+    daily_max_rows: int = 60,
     reports_dir: Path | None = None,
-    polyfit_fixed_params: dict | None = None,
-    ma_fixed_params: dict | None = None,
-    launch_fixed_params: dict | None = None,
-    retest_fixed_params: dict | None = None,
-    event_fixed_params: dict | None = None,
+    report_prefix: str | None = None,
 ) -> pd.DataFrame:
     root = Path(__file__).resolve().parent
     reports = reports_dir or (root / "reports")
     if generate_artifacts:
         reports.mkdir(parents=True, exist_ok=True)
 
+    prefix = report_prefix or f"wf3y1y_ma{int(ma_window_days):02d}"
     splits = build_rolling_splits_3y1y(base_data)
     rows: list[dict] = []
+    ma_prev_ending_position: float | None = None
+    annual_images: list[Path] = []
+    daily_images: list[Path] = []
 
     for i, (train_start, train_end, val_start, val_end) in enumerate(splits, start=1):
         train_df = base_data.loc[(base_data.index >= train_start) & (base_data.index <= train_end)]
         val_df = base_data.loc[(base_data.index >= val_start) & (base_data.index <= val_end)]
 
         print(
-            f"\n===== 五策略 3年训练1年验证 {i}/{len(splits)} =====\n"
+            f"\n===== MA固定周期 3年训练1年验证 {i}/{len(splits)} =====\n"
+            f"MA周期: {int(ma_window_days)}\n"
             f"训练区间: {train_start.date()} -> {train_end.date()}\n"
             f"验证区间: {val_start.date()} -> {val_end.date()}"
         )
 
-        if polyfit_fixed_params is None:
-            polyfit_best_params, polyfit_scan_df = scan_parameters(
-                train_df,
-                polyfit_param_space,
-                max_evals=max_evals,
-                random_seed=random_seed + i,
+        ma_best_params, ma_scan_df = scan_ma_parameters(
+            train_df,
+            ma_param_space,
+            max_evals=max_evals,
+            random_seed=random_seed + i,
+        )
+
+        combined_train_val = pd.concat([train_df, val_df]).sort_index()
+        combined_train_val = combined_train_val.loc[~combined_train_val.index.duplicated(keep="last")]
+        if ma_prev_ending_position is None:
+            ma_featured = add_ma_strategy_features(
+                combined_train_val,
+                int(ma_best_params["ma_window_days"]),
+                int(ma_best_params["trend_window_days"]),
+                int(ma_best_params["vol_window_days"]),
+            )
+            ma_bt_probe = ma_featured.loc[(ma_featured.index >= val_df.index[0]) & (ma_featured.index <= val_df.index[-1])].copy()
+            ma_initial_position = _initial_position_from_deviation(
+                ma_bt_probe,
+                deviation_col="MADevPct",
+                base_grid_pct=float(ma_best_params["base_grid_pct"]),
+                min_signal_strength=float(ma_best_params["min_signal_strength"]),
+                max_grid_levels=int(ma_best_params["max_grid_levels"]),
+                position_size=float(ma_best_params["position_size"]),
             )
         else:
-            polyfit_best_params = dict(polyfit_fixed_params)
-            polyfit_scan_df = pd.DataFrame([polyfit_best_params])
+            ma_initial_position = float(np.clip(ma_prev_ending_position, 0.0, 1.0))
 
-        if ma_fixed_params is None:
-            ma_best_params, ma_scan_df = scan_ma_parameters(
-                train_df,
-                ma_param_space,
-                max_evals=max_evals,
-                random_seed=random_seed + 5_000 + i,
-            )
-        else:
-            ma_best_params = dict(ma_fixed_params)
-            ma_scan_df = pd.DataFrame([ma_best_params])
-
-        if launch_fixed_params is None:
-            launch_best_params, launch_scan_df = scan_launch_parameters(
-                train_df,
-                launch_param_space,
-                max_evals=max_evals,
-                random_seed=random_seed + 10_000 + i,
-            )
-        else:
-            launch_best_params = dict(launch_fixed_params)
-            launch_scan_df = pd.DataFrame([launch_best_params])
-
-        if retest_fixed_params is None:
-            retest_best_params, retest_scan_df = scan_retest_parameters(
-                train_df,
-                retest_param_space,
-                max_evals=max_evals,
-                random_seed=random_seed + 20_000 + i,
-            )
-        else:
-            retest_best_params = dict(retest_fixed_params)
-            retest_scan_df = pd.DataFrame([retest_best_params])
-
-        if event_fixed_params is None:
-            event_best_params, event_scan_df = scan_event_parameters(
-                train_df,
-                event_param_space,
-                max_evals=max_evals,
-                random_seed=random_seed + 30_000 + i,
-            )
-        else:
-            event_best_params = dict(event_fixed_params)
-            event_scan_df = pd.DataFrame([event_best_params])
-
-        polyfit_stats, polyfit_val_data = run_strategy_backtest(val_df, polyfit_best_params, warmup_data=train_df)
-        ma_stats, ma_val_data = run_ma_strategy_backtest(val_df, ma_best_params, warmup_data=train_df)
-        launch_stats, launch_val_data = run_launch_strategy_backtest(val_df, launch_best_params, warmup_data=train_df)
-        retest_stats, retest_val_data = run_retest_strategy_backtest(val_df, retest_best_params, warmup_data=train_df)
-        event_stats, event_val_data = run_event_strategy_backtest(val_df, event_best_params, warmup_data=train_df)
+        ma_stats, ma_val_data = run_ma_strategy_backtest(
+            val_df,
+            ma_best_params,
+            warmup_data=train_df,
+            initial_position=ma_initial_position,
+        )
+        ma_prev_ending_position = _extract_ending_position(ma_stats)
 
         if generate_artifacts:
-            polyfit_daily_png = reports / f"wf3y1y_{i:02d}_polyfit_daily_cumulative_return_comparison.png"
-            ma_daily_png = reports / f"wf3y1y_{i:02d}_ma_daily_cumulative_return_comparison.png"
-            launch_daily_png = reports / f"wf3y1y_{i:02d}_launch_daily_cumulative_return_comparison.png"
-            retest_daily_png = reports / f"wf3y1y_{i:02d}_retest_daily_cumulative_return_comparison.png"
-            event_daily_png = reports / f"wf3y1y_{i:02d}_event_daily_cumulative_return_comparison.png"
-            pair_daily_png = reports / f"wf3y1y_{i:02d}_strategy_quint_daily_comparison.png"
-            polyfit_daily_csv = reports / f"wf3y1y_{i:02d}_polyfit_daily_cumulative_return_comparison.csv"
-            ma_daily_csv = reports / f"wf3y1y_{i:02d}_ma_daily_cumulative_return_comparison.csv"
-            launch_daily_csv = reports / f"wf3y1y_{i:02d}_launch_daily_cumulative_return_comparison.csv"
-            retest_daily_csv = reports / f"wf3y1y_{i:02d}_retest_daily_cumulative_return_comparison.csv"
-            event_daily_csv = reports / f"wf3y1y_{i:02d}_event_daily_cumulative_return_comparison.csv"
-            pair_daily_csv = reports / f"wf3y1y_{i:02d}_strategy_quint_daily_comparison.csv"
-            polyfit_scan_csv = reports / f"wf3y1y_{i:02d}_polyfit_train_scan_top50.csv"
-            ma_scan_csv = reports / f"wf3y1y_{i:02d}_ma_train_scan_top50.csv"
-            launch_scan_csv = reports / f"wf3y1y_{i:02d}_launch_train_scan_top50.csv"
-            retest_scan_csv = reports / f"wf3y1y_{i:02d}_retest_train_scan_top50.csv"
-            event_scan_csv = reports / f"wf3y1y_{i:02d}_event_train_scan_top50.csv"
+            annual_png = reports / f"{prefix}_{i:02d}_annual_return_comparison.png"
+            daily_png = reports / f"{prefix}_{i:02d}_daily_cumulative_return_comparison.png"
+            annual_csv = reports / f"{prefix}_{i:02d}_annual_return_comparison.csv"
+            daily_csv = reports / f"{prefix}_{i:02d}_daily_cumulative_return_comparison.csv"
+            scan_csv = reports / f"{prefix}_{i:02d}_train_scan_top50.csv"
+            trades_csv = reports / f"{prefix}_{i:02d}_trade_records.csv"
 
-            polyfit_daily_df = plot_daily_cumulative_return_comparison(
-                strategy_equity_curve=polyfit_stats["_equity_curve"],
-                benchmark_close=polyfit_val_data["Close"],
-                title=f"窗口{i}: 回归策略 vs 长期持有（每日累计收益）",
-                output_path=polyfit_daily_png,
-                trades=polyfit_stats["_trades"],
-                baseline_series=polyfit_val_data["PolyBasePred"],
-                baseline_label="回归基准累计收益",
-            )
-            ma_daily_df = plot_daily_cumulative_return_comparison(
+            annual_df = plot_annual_return_comparison(
                 strategy_equity_curve=ma_stats["_equity_curve"],
                 benchmark_close=ma_val_data["Close"],
-                title=f"窗口{i}: MA 基准策略 vs 长期持有（每日累计收益）",
-                output_path=ma_daily_png,
+                title=f"窗口{i}: MA{int(ma_window_days)} 策略 vs 长期持有（年度独立收益）",
+                output_path=annual_png,
+            )
+            daily_df = plot_daily_cumulative_return_comparison(
+                strategy_equity_curve=ma_stats["_equity_curve"],
+                benchmark_close=ma_val_data["Close"],
+                title=f"窗口{i}: MA{int(ma_window_days)} 策略 vs 长期持有（每日累计收益）",
+                output_path=daily_png,
                 trades=ma_stats["_trades"],
                 baseline_series=ma_val_data["MABase"],
                 baseline_label="MA基准累计收益",
             )
-            launch_daily_df = plot_daily_cumulative_return_comparison(
-                strategy_equity_curve=launch_stats["_equity_curve"],
-                benchmark_close=launch_val_data["Close"],
-                title=f"窗口{i}: 启动突破策略 vs 长期持有（每日累计收益）",
-                output_path=launch_daily_png,
-                trades=launch_stats["_trades"],
+            if print_daily:
+                print_daily_cumulative_returns_with_signals(
+                    compare=daily_df,
+                    trades=ma_stats["_trades"],
+                    label=f"MA{int(ma_window_days)} 窗口{i}",
+                    max_rows=daily_max_rows,
+                )
+            annual_df.to_csv(annual_csv, index=True, encoding="utf-8-sig")
+            daily_df.to_csv(daily_csv, index=True, encoding="utf-8-sig")
+            ma_scan_df.head(50).to_csv(scan_csv, index=False, encoding="utf-8-sig")
+            export_trade_records_csv(
+                ma_stats["_trades"],
+                trades_csv,
+                bt_data=ma_val_data,
+                equity_curve=ma_stats["_equity_curve"],
+                strategy_name="ma",
+                params=ma_best_params,
+                native_reason_records=getattr(ma_stats.get("_strategy"), "trade_reason_records", None),
             )
-            retest_daily_df = plot_daily_cumulative_return_comparison(
-                strategy_equity_curve=retest_stats["_equity_curve"],
-                benchmark_close=retest_val_data["Close"],
-                title=f"窗口{i}: 突破回踩确认策略 vs 长期持有（每日累计收益）",
-                output_path=retest_daily_png,
-                trades=retest_stats["_trades"],
-            )
-            event_daily_df = plot_daily_cumulative_return_comparison(
-                strategy_equity_curve=event_stats["_equity_curve"],
-                benchmark_close=event_val_data["Close"],
-                title=f"窗口{i}: 事件型启动策略 vs 长期持有（每日累计收益）",
-                output_path=event_daily_png,
-                trades=event_stats["_trades"],
-            )
-            pair_daily_df = plot_multi_strategy_cumulative_comparison(
-                strategy_curves={
-                    "回归策略累计收益": polyfit_stats["_equity_curve"],
-                    "MA基准策略累计收益": ma_stats["_equity_curve"],
-                    "启动突破策略累计收益": launch_stats["_equity_curve"],
-                    "突破回踩确认策略累计收益": retest_stats["_equity_curve"],
-                    "事件型启动策略累计收益": event_stats["_equity_curve"],
-                },
-                benchmark_close=val_df["Close"],
-                title=f"窗口{i}: 回归策略 vs MA基准策略 vs 启动突破 vs 突破回踩确认 vs 事件型启动 vs 长期持有",
-                output_path=pair_daily_png,
-            )
-            polyfit_daily_df.to_csv(polyfit_daily_csv, index=True, encoding="utf-8-sig")
-            ma_daily_df.to_csv(ma_daily_csv, index=True, encoding="utf-8-sig")
-            launch_daily_df.to_csv(launch_daily_csv, index=True, encoding="utf-8-sig")
-            retest_daily_df.to_csv(retest_daily_csv, index=True, encoding="utf-8-sig")
-            event_daily_df.to_csv(event_daily_csv, index=True, encoding="utf-8-sig")
-            pair_daily_df.to_csv(pair_daily_csv, index=True, encoding="utf-8-sig")
-            polyfit_scan_df.head(50).to_csv(polyfit_scan_csv, index=False, encoding="utf-8-sig")
-            ma_scan_df.head(50).to_csv(ma_scan_csv, index=False, encoding="utf-8-sig")
-            launch_scan_df.head(50).to_csv(launch_scan_csv, index=False, encoding="utf-8-sig")
-            retest_scan_df.head(50).to_csv(retest_scan_csv, index=False, encoding="utf-8-sig")
-            event_scan_df.head(50).to_csv(event_scan_csv, index=False, encoding="utf-8-sig")
+            annual_images.append(annual_png)
+            daily_images.append(daily_png)
 
-        polyfit_metrics = summarize_backtest_metrics(polyfit_stats, polyfit_val_data["Close"])
         ma_metrics = summarize_backtest_metrics(ma_stats, ma_val_data["Close"])
-        launch_metrics = summarize_backtest_metrics(launch_stats, launch_val_data["Close"])
-        retest_metrics = summarize_backtest_metrics(retest_stats, retest_val_data["Close"])
-        event_metrics = summarize_backtest_metrics(event_stats, event_val_data["Close"])
         rows.append(
             {
+                "MA周期": int(ma_window_days),
+                "窗口": i,
+                "训练开始": str(train_start.date()),
+                "训练结束": str(train_end.date()),
+                "验证开始": str(val_start.date()),
+                "验证结束": str(val_end.date()),
+                **{f"ma_{name}": ma_best_params[name] for name in MA_SCAN_PARAM_NAMES},
+                **{f"ma_{k}": v for k, v in ma_metrics.items()},
+                "ma_初始仓位": ma_initial_position,
+                "ma_结束仓位": ma_prev_ending_position,
+            }
+        )
+
+        print(f"窗口{i} MA{int(ma_window_days)} 策略总收益率: {ma_metrics['总收益率'] * 100:.2f}%")
+        print(f"窗口{i} MA{int(ma_window_days)} 策略超额收益: {ma_metrics['超额收益'] * 100:.2f}%")
+        print(f"窗口{i} MA{int(ma_window_days)} 策略最大回撤: {ma_metrics['最大回撤'] * 100:.2f}%")
+
+    if generate_artifacts and len(daily_images) == 4:
+        summary_md = reports / f"{prefix}_comparison_summary.md"
+        write_window_comparison_summary_markdown(
+            summary_md,
+            title=f"MA{int(ma_window_days)} 固定周期 3年训练1年验证图表汇总",
+            sections=[
+                ("年度独立收益对比图", annual_images),
+                ("每日累计收益对比图", daily_images),
+            ],
+        )
+
+    return pd.DataFrame(rows)
+
+
+def run_polyfit_walk_forward_validation_3y1y(
+    base_data: pd.DataFrame,
+    polyfit_param_space: dict[str, list],
+    fit_window_days: int,
+    max_evals: int = 800,
+    random_seed: int = 42,
+    generate_artifacts: bool = True,
+    print_daily: bool = True,
+    daily_max_rows: int = 60,
+    reports_dir: Path | None = None,
+    report_prefix: str | None = None,
+) -> pd.DataFrame:
+    root = Path(__file__).resolve().parent
+    reports = reports_dir or (root / "reports")
+    if generate_artifacts:
+        reports.mkdir(parents=True, exist_ok=True)
+
+    prefix = report_prefix or f"wf3y1y_polyfitfit{int(fit_window_days):03d}"
+    splits = build_rolling_splits_3y1y(base_data)
+    rows: list[dict] = []
+    polyfit_prev_ending_position: float | None = None
+    annual_images: list[Path] = []
+    daily_images: list[Path] = []
+
+    for i, (train_start, train_end, val_start, val_end) in enumerate(splits, start=1):
+        train_df = base_data.loc[(base_data.index >= train_start) & (base_data.index <= train_end)]
+        val_df = base_data.loc[(base_data.index >= val_start) & (base_data.index <= val_end)]
+
+        print(
+            f"\n===== Polyfit固定拟合窗 3年训练1年验证 {i}/{len(splits)} =====\n"
+            f"拟合窗口: {int(fit_window_days)}\n"
+            f"训练区间: {train_start.date()} -> {train_end.date()}\n"
+            f"验证区间: {val_start.date()} -> {val_end.date()}"
+        )
+
+        polyfit_best_params, polyfit_scan_df = scan_parameters(
+            train_df,
+            polyfit_param_space,
+            max_evals=max_evals,
+            random_seed=random_seed + i,
+        )
+
+        combined_train_val = pd.concat([train_df, val_df]).sort_index()
+        combined_train_val = combined_train_val.loc[~combined_train_val.index.duplicated(keep="last")]
+        if polyfit_prev_ending_position is None:
+            polyfit_featured = add_strategy_features(
+                combined_train_val,
+                int(polyfit_best_params["fit_window_days"]),
+                int(polyfit_best_params["trend_window_days"]),
+                int(polyfit_best_params["vol_window_days"]),
+            )
+            polyfit_bt_probe = polyfit_featured.loc[(polyfit_featured.index >= val_df.index[0]) & (polyfit_featured.index <= val_df.index[-1])].copy()
+            polyfit_initial_position = _initial_position_from_deviation(
+                polyfit_bt_probe,
+                deviation_col="PolyDevPct",
+                base_grid_pct=float(polyfit_best_params["base_grid_pct"]),
+                min_signal_strength=float(polyfit_best_params["min_signal_strength"]),
+                max_grid_levels=int(polyfit_best_params["max_grid_levels"]),
+                position_size=float(polyfit_best_params["position_size"]),
+            )
+        else:
+            polyfit_initial_position = float(np.clip(polyfit_prev_ending_position, 0.0, 1.0))
+
+        polyfit_stats, polyfit_val_data = run_strategy_backtest(
+            val_df,
+            polyfit_best_params,
+            warmup_data=train_df,
+            initial_position=polyfit_initial_position,
+        )
+        polyfit_prev_ending_position = _extract_ending_position(polyfit_stats)
+
+        if generate_artifacts:
+            annual_png = reports / f"{prefix}_{i:02d}_annual_return_comparison.png"
+            daily_png = reports / f"{prefix}_{i:02d}_daily_cumulative_return_comparison.png"
+            annual_csv = reports / f"{prefix}_{i:02d}_annual_return_comparison.csv"
+            daily_csv = reports / f"{prefix}_{i:02d}_daily_cumulative_return_comparison.csv"
+            scan_csv = reports / f"{prefix}_{i:02d}_train_scan_top50.csv"
+            trades_csv = reports / f"{prefix}_{i:02d}_trade_records.csv"
+
+            annual_df = plot_annual_return_comparison(
+                strategy_equity_curve=polyfit_stats["_equity_curve"],
+                benchmark_close=polyfit_val_data["Close"],
+                title=f"窗口{i}: Polyfit拟合窗{int(fit_window_days)} 策略 vs 长期持有（年度独立收益）",
+                output_path=annual_png,
+            )
+            daily_df = plot_daily_cumulative_return_comparison(
+                strategy_equity_curve=polyfit_stats["_equity_curve"],
+                benchmark_close=polyfit_val_data["Close"],
+                title=f"窗口{i}: Polyfit拟合窗{int(fit_window_days)} 策略 vs 长期持有（每日累计收益）",
+                output_path=daily_png,
+                trades=polyfit_stats["_trades"],
+                baseline_series=polyfit_val_data["PolyBasePred"],
+                baseline_label="Polyfit基准累计收益",
+            )
+            if print_daily:
+                print_daily_cumulative_returns_with_signals(
+                    compare=daily_df,
+                    trades=polyfit_stats["_trades"],
+                    label=f"Polyfit拟合窗{int(fit_window_days)} 窗口{i}",
+                    max_rows=daily_max_rows,
+                )
+            annual_df.to_csv(annual_csv, index=True, encoding="utf-8-sig")
+            daily_df.to_csv(daily_csv, index=True, encoding="utf-8-sig")
+            polyfit_scan_df.head(50).to_csv(scan_csv, index=False, encoding="utf-8-sig")
+            export_trade_records_csv(
+                polyfit_stats["_trades"],
+                trades_csv,
+                bt_data=polyfit_val_data,
+                equity_curve=polyfit_stats["_equity_curve"],
+                strategy_name="polyfit",
+                params=polyfit_best_params,
+                native_reason_records=getattr(polyfit_stats.get("_strategy"), "trade_reason_records", None),
+            )
+            annual_images.append(annual_png)
+            daily_images.append(daily_png)
+
+        polyfit_metrics = summarize_backtest_metrics(polyfit_stats, polyfit_val_data["Close"])
+        rows.append(
+            {
+                "拟合窗口": int(fit_window_days),
                 "窗口": i,
                 "训练开始": str(train_start.date()),
                 "训练结束": str(train_end.date()),
                 "验证开始": str(val_start.date()),
                 "验证结束": str(val_end.date()),
                 **{f"polyfit_{name}": polyfit_best_params[name] for name in POLYFIT_SCAN_PARAM_NAMES},
-                **{f"ma_{name}": ma_best_params[name] for name in MA_SCAN_PARAM_NAMES},
-                **{f"launch_{name}": launch_best_params[name] for name in LAUNCH_SCAN_PARAM_NAMES},
-                **{f"retest_{name}": retest_best_params[name] for name in RETEST_SCAN_PARAM_NAMES},
-                **{f"event_{name}": event_best_params[name] for name in EVENT_SCAN_PARAM_NAMES},
                 **{f"polyfit_{k}": v for k, v in polyfit_metrics.items()},
-                **{f"ma_{k}": v for k, v in ma_metrics.items()},
-                **{f"launch_{k}": v for k, v in launch_metrics.items()},
-                **{f"retest_{k}": v for k, v in retest_metrics.items()},
-                **{f"event_{k}": v for k, v in event_metrics.items()},
-                "MA优于回归_超额收益差": ma_metrics["超额收益"] - polyfit_metrics["超额收益"],
-                "MA优于回归_总收益差": ma_metrics["总收益率"] - polyfit_metrics["总收益率"],
-                "启动优于回归_超额收益差": launch_metrics["超额收益"] - polyfit_metrics["超额收益"],
-                "启动优于回归_总收益差": launch_metrics["总收益率"] - polyfit_metrics["总收益率"],
-                "回踩优于回归_超额收益差": retest_metrics["超额收益"] - polyfit_metrics["超额收益"],
-                "回踩优于回归_总收益差": retest_metrics["总收益率"] - polyfit_metrics["总收益率"],
-                "事件优于回归_超额收益差": event_metrics["超额收益"] - polyfit_metrics["超额收益"],
-                "事件优于回归_总收益差": event_metrics["总收益率"] - polyfit_metrics["总收益率"],
-                "回踩优于启动_总收益差": retest_metrics["总收益率"] - launch_metrics["总收益率"],
-                "事件优于启动_总收益差": event_metrics["总收益率"] - launch_metrics["总收益率"],
-                "事件优于回踩_总收益差": event_metrics["总收益率"] - retest_metrics["总收益率"],
+                "polyfit_初始仓位": polyfit_initial_position,
+                "polyfit_结束仓位": polyfit_prev_ending_position,
             }
         )
 
-        print(f"窗口{i} 回归策略总收益率: {polyfit_metrics['总收益率'] * 100:.2f}%")
-        print(f"窗口{i} MA 基准策略总收益率: {ma_metrics['总收益率'] * 100:.2f}%")
-        print(f"窗口{i} 启动突破策略总收益率: {launch_metrics['总收益率'] * 100:.2f}%")
-        print(f"窗口{i} 突破回踩确认策略总收益率: {retest_metrics['总收益率'] * 100:.2f}%")
-        print(f"窗口{i} 事件型启动策略总收益率: {event_metrics['总收益率'] * 100:.2f}%")
+        print(f"窗口{i} Polyfit拟合窗{int(fit_window_days)} 总收益率: {polyfit_metrics['总收益率'] * 100:.2f}%")
+        print(f"窗口{i} Polyfit拟合窗{int(fit_window_days)} 超额收益: {polyfit_metrics['超额收益'] * 100:.2f}%")
+        print(f"窗口{i} Polyfit拟合窗{int(fit_window_days)} 最大回撤: {polyfit_metrics['最大回撤'] * 100:.2f}%")
+
+    if generate_artifacts and len(daily_images) == 4:
+        summary_md = reports / f"{prefix}_comparison_summary.md"
+        write_window_comparison_summary_markdown(
+            summary_md,
+            title=f"Polyfit拟合窗{int(fit_window_days)} 固定周期 3年训练1年验证图表汇总",
+            sections=[
+                ("年度独立收益对比图", annual_images),
+                ("每日累计收益对比图", daily_images),
+            ],
+        )
 
     return pd.DataFrame(rows)
+
+
+def run_polyfit_fit_window_comparison_3y1y(
+    base_data: pd.DataFrame,
+    fit_windows: list[int],
+    polyfit_param_space: dict[str, list] | None = None,
+    max_evals: int = 800,
+    random_seed: int = 42,
+    generate_artifacts: bool = True,
+    print_daily: bool = True,
+    daily_max_rows: int = 60,
+    reports_dir: Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    root = Path(__file__).resolve().parent
+    reports = reports_dir or (root / "reports")
+    if generate_artifacts:
+        reports.mkdir(parents=True, exist_ok=True)
+
+    detailed_frames: list[pd.DataFrame] = []
+    aggregate_rows: list[dict] = []
+
+    for idx, fit_window in enumerate(fit_windows):
+        fixed_param_space = build_fixed_polyfit_param_space(int(fit_window), polyfit_param_space)
+        detail_df = run_polyfit_walk_forward_validation_3y1y(
+            base_data,
+            polyfit_param_space=fixed_param_space,
+            fit_window_days=int(fit_window),
+            max_evals=max_evals,
+            random_seed=random_seed + idx * 10_000,
+            generate_artifacts=generate_artifacts,
+            print_daily=print_daily,
+            daily_max_rows=daily_max_rows,
+            reports_dir=reports,
+            report_prefix=f"wf3y1y_polyfitfit{int(fit_window):03d}",
+        )
+        detail_summary_path = reports / f"wf3y1y_polyfitfit{int(fit_window):03d}_strategy_summary.csv"
+        detail_df.to_csv(detail_summary_path, index=False, encoding="utf-8-sig")
+        detailed_frames.append(detail_df)
+
+        aggregate_rows.append(
+            {
+                "拟合窗口": int(fit_window),
+                "平均总收益率": float(detail_df["polyfit_总收益率"].mean()),
+                "平均超额收益": float(detail_df["polyfit_超额收益"].mean()),
+                "平均最大回撤": float(detail_df["polyfit_最大回撤"].mean()),
+                "平均年化收益率": float(detail_df["polyfit_年化收益率"].mean()),
+                "平均月化收益率": float(detail_df["polyfit_月化收益率"].mean()),
+                "平均交易次数": float(detail_df["polyfit_交易次数"].mean()),
+                "平均持有天数": float(detail_df["polyfit_平均持有天数"].mean()),
+                "最佳窗口": int(detail_df.loc[detail_df["polyfit_总收益率"].idxmax(), "窗口"]),
+                "最佳窗口总收益率": float(detail_df["polyfit_总收益率"].max()),
+            }
+        )
+
+    detailed_df = pd.concat(detailed_frames, ignore_index=True) if detailed_frames else pd.DataFrame()
+    aggregate_df = pd.DataFrame(aggregate_rows).sort_values("平均总收益率", ascending=False).reset_index(drop=True)
+
+    if generate_artifacts:
+        detailed_df.to_csv(reports / "wf3y1y_polyfit_fit_window_comparison_detailed.csv", index=False, encoding="utf-8-sig")
+        aggregate_df.to_csv(reports / "wf3y1y_polyfit_fit_window_comparison_summary.csv", index=False, encoding="utf-8-sig")
+
+    return detailed_df, aggregate_df
+
+
+def run_ma_period_comparison_3y1y(
+    base_data: pd.DataFrame,
+    ma_windows: list[int],
+    ma_param_space: dict[str, list] | None = None,
+    max_evals: int = 800,
+    random_seed: int = 42,
+    generate_artifacts: bool = True,
+    print_daily: bool = True,
+    daily_max_rows: int = 60,
+    reports_dir: Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    root = Path(__file__).resolve().parent
+    reports = reports_dir or (root / "reports")
+    if generate_artifacts:
+        reports.mkdir(parents=True, exist_ok=True)
+
+    detailed_frames: list[pd.DataFrame] = []
+    aggregate_rows: list[dict] = []
+
+    for idx, ma_window in enumerate(ma_windows):
+        fixed_param_space = build_fixed_ma_param_space(int(ma_window), ma_param_space)
+        detail_df = run_ma_walk_forward_validation_3y1y(
+            base_data,
+            ma_param_space=fixed_param_space,
+            ma_window_days=int(ma_window),
+            max_evals=max_evals,
+            random_seed=random_seed + idx * 10_000,
+            generate_artifacts=generate_artifacts,
+            print_daily=print_daily,
+            daily_max_rows=daily_max_rows,
+            reports_dir=reports,
+            report_prefix=f"wf3y1y_ma{int(ma_window):02d}",
+        )
+        detail_summary_path = reports / f"wf3y1y_ma{int(ma_window):02d}_strategy_summary.csv"
+        detail_df.to_csv(detail_summary_path, index=False, encoding="utf-8-sig")
+        detailed_frames.append(detail_df)
+
+        aggregate_rows.append(
+            {
+                "MA周期": int(ma_window),
+                "平均总收益率": float(detail_df["ma_总收益率"].mean()),
+                "平均超额收益": float(detail_df["ma_超额收益"].mean()),
+                "平均最大回撤": float(detail_df["ma_最大回撤"].mean()),
+                "平均年化收益率": float(detail_df["ma_年化收益率"].mean()),
+                "平均月化收益率": float(detail_df["ma_月化收益率"].mean()),
+                "平均交易次数": float(detail_df["ma_交易次数"].mean()),
+                "平均持有天数": float(detail_df["ma_平均持有天数"].mean()),
+                "最佳窗口": int(detail_df.loc[detail_df["ma_总收益率"].idxmax(), "窗口"]),
+                "最佳窗口总收益率": float(detail_df["ma_总收益率"].max()),
+            }
+        )
+
+    detailed_df = pd.concat(detailed_frames, ignore_index=True) if detailed_frames else pd.DataFrame()
+    aggregate_df = pd.DataFrame(aggregate_rows).sort_values("平均总收益率", ascending=False).reset_index(drop=True)
+
+    if generate_artifacts:
+        detailed_df.to_csv(reports / "wf3y1y_ma_period_comparison_detailed.csv", index=False, encoding="utf-8-sig")
+        aggregate_df.to_csv(reports / "wf3y1y_ma_period_comparison_summary.csv", index=False, encoding="utf-8-sig")
+
+    return detailed_df, aggregate_df
 
 
 def run_polyfit_ma_comparison_3y1y(
@@ -2249,6 +1851,8 @@ def run_polyfit_ma_comparison_3y1y(
             pair_daily_csv = reports / f"wf3y1y_{i:02d}_strategy_pair_daily_comparison.csv"
             polyfit_scan_csv = reports / f"wf3y1y_{i:02d}_polyfit_train_scan_top50.csv"
             ma_scan_csv = reports / f"wf3y1y_{i:02d}_ma_train_scan_top50.csv"
+            polyfit_trades_csv = reports / f"wf3y1y_{i:02d}_polyfit_trade_records.csv"
+            ma_trades_csv = reports / f"wf3y1y_{i:02d}_ma_trade_records.csv"
 
             polyfit_daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=polyfit_stats["_equity_curve"],
@@ -2282,6 +1886,8 @@ def run_polyfit_ma_comparison_3y1y(
             pair_daily_df.to_csv(pair_daily_csv, index=True, encoding="utf-8-sig")
             polyfit_scan_df.head(50).to_csv(polyfit_scan_csv, index=False, encoding="utf-8-sig")
             ma_scan_df.head(50).to_csv(ma_scan_csv, index=False, encoding="utf-8-sig")
+            export_trade_records_csv(polyfit_stats["_trades"], polyfit_trades_csv, bt_data=polyfit_val_data, equity_curve=polyfit_stats["_equity_curve"], strategy_name="polyfit", params=polyfit_best_params, native_reason_records=getattr(polyfit_stats.get("_strategy"), "trade_reason_records", None))
+            export_trade_records_csv(ma_stats["_trades"], ma_trades_csv, bt_data=ma_val_data, equity_curve=ma_stats["_equity_curve"], strategy_name="ma", params=ma_best_params, native_reason_records=getattr(ma_stats.get("_strategy"), "trade_reason_records", None))
 
         polyfit_metrics = summarize_backtest_metrics(polyfit_stats, polyfit_val_data["Close"])
         ma_metrics = summarize_backtest_metrics(ma_stats, ma_val_data["Close"])
@@ -2326,7 +1932,7 @@ def main() -> None:
         base_data,
         polyfit_param_space=polyfit_param_space,
         ma_param_space=ma_param_space,
-        max_evals=320,
+        max_evals=800,
         random_seed=42,
         generate_artifacts=True,
     )

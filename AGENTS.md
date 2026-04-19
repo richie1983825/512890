@@ -31,6 +31,8 @@
 - After every backtest run, always generate and save these two comparison charts:
 	- Strategy vs Buy-and-Hold annual return comparison chart.
 	- Strategy vs Buy-and-Hold daily cumulative return comparison chart, with buy/sell markers.
+- After every backtest run, always export a dedicated trade-record CSV under `reports/` for each strategy/run, so fills can be queried later.
+	- Recommended fields: entry time, exit time, size, entry price, exit price, pnl, return pct, and holding days.
 - After every backtest run, always append the run result to `records.md` and record one entry per strategy/run.
 	- Required fields for each entry: round/backtest identifier, return, max drawdown, excess return, number of trades, and holding days.
 - When yearly validation produces 4 comparison images (one per year/window), always generate an additional Markdown summary file (under `reports/`) that embeds the 4 images together in one page for quick side-by-side review.
@@ -46,52 +48,25 @@
 
 ## Implemented Strategies
 
-- Strategy 1: `WeeklyReversalStrategy`
-	- Type: Weekly signal + daily execution reversal strategy (EMA/ATR dynamic thresholds).
-	- Core behavior: Threshold pullback entry, tiered TP, hard stop, trailing stop, max holding days.
-	- Default parameters:
-		- `ma_window_weeks = 8`
-		- `atr_window_weeks = 8`
-		- `buy_atr_mult = 0.75`
-		- `tier1_tp_atr_mult = 0.75`
-		- `tier2_tp_atr_mult = 1.50`
-		- `stop_atr_mult = 1.50`
-		- `trailing_atr_mult = 2.00`
-		- `max_holding_days = 30`
-		- `trend_filter = false`
-		- `reversal_rsi_max = 55`
+- Strategy 0: `PolyfitDynamicGridStrategy`
+	- Type: Polyfit baseline dynamic grid mean-reversion strategy.
+	- Core behavior:
+		- Uses `PolyBasePred` as trading baseline.
+		- Uses `PolyDevPct`, `PolyDevTrend`, and `RollingVolPct` to dynamically scale grid thresholds.
+		- Supports runtime trade reason capture and trade-record CSV export.
 	- Main optimization/search functions:
 		- `build_param_space()`
 		- `scan_parameters(base_data, param_space, max_evals=..., random_seed=...)`
 
-- Strategy 2: `AdaptiveShockReversalStrategy`
-	- Type: Enhanced reversal strategy with panic-exit, momentum-entry, volatility regime switching, and execution optimization.
+- Strategy 1: `MovingAverageDynamicGridStrategy`
+	- Type: Moving-average baseline dynamic grid mean-reversion strategy.
 	- Core behavior:
-		- Panic exit on gap/down-shock conditions.
-		- Momentum entry for strong up moves.
-		- Dynamic stop/holding limits under high-volatility regime.
-		- Anti-overstay / anti-idle execution controls.
-	- Default parameters:
-		- `buy_atr_mult = 0.75`
-		- `tier1_tp_atr_mult = 0.75`
-		- `tier2_tp_atr_mult = 1.50`
-		- `stop_atr_mult = 1.50`
-		- `trailing_atr_mult = 2.00`
-		- `max_holding_days = 30`
-		- `reversal_rsi_max = 55`
-		- `panic_daily_drop = -0.02`
-		- `panic_gap_drop = -0.015`
-		- `panic_atr_mult = 1.5`
-		- `momentum_breakout_atr_mult = 0.35`
-		- `momentum_rsi_max = 72`
-		- `high_vol_ratio_threshold = 1.2`
-		- `high_vol_stop_atr_mult = 1.2`
-		- `high_vol_trailing_atr_mult = 1.8`
-		- `high_vol_max_holding_days = 20`
-		- `max_flat_days = 20`
-	- Main optimization/search scripts:
-		- `scans/adaptive_scan_mp.py` (multi-process random large-sample scan)
-		- `scans/adaptive_scan_full_mp.py` (multi-process exhaustive scan framework)
+		- Uses `MABase` as trading baseline.
+		- Uses `MADevPct`, `MADevTrend`, and `RollingVolPct` to dynamically scale grid thresholds.
+		- Supports runtime trade reason capture and trade-record CSV export.
+	- Main optimization/search functions:
+		- `build_ma_param_space()`
+		- `scan_ma_parameters(base_data, param_space, max_evals=..., random_seed=...)`
 
 ## Shared Core Functions
 
