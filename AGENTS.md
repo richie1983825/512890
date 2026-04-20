@@ -15,6 +15,15 @@
 - Keep changes minimal and aligned with the current Python 3.14.3 project setup
 - Store all source and intermediate datasets under the `data/` directory
 - Save all backtest reports, csv summaries, and chart outputs under the `reports/` directory
+- `main.py` is the parameter-scanning workflow entry (walk-forward scan + compare), not a fixed-seed optimal-parameter replay script.
+
+## Which Script To Run For Seed 142 Best Params
+
+- If the goal is "run the strategy using seed 142 best parameters", use `run_formal_report.py`.
+- Run command: `uv run run_formal_report.py`
+- `run_formal_report.py` is the report-oriented strategy runner for the global-best switch workflow.
+- In current code, this script is configured with seed 342 by default (`report_root` folder name and `random_seed=342 + idx`).
+- To run seed 142 outputs, update those seed settings in `run_formal_report.py` from 342 to 142 before execution.
 
 ## Plot Font Warning Prevention (Matplotlib)
 

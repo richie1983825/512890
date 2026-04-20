@@ -13,6 +13,22 @@
 uv run main.py
 ```
 
+说明：`main.py` 走的是滚动窗口参数扫描对比流程（会在每个窗口扫描参数），不是固定使用某一组已知最优参数（例如 seed 142）的回放脚本。
+
+## 跑 seed 142 最优参数应使用哪个脚本
+
+请使用：
+
+```bash
+uv run run_formal_report.py
+```
+
+补充说明：
+
+- `run_formal_report.py` 是用于生成 global best switch 正式报告的入口。
+- 当前仓库版本中该脚本默认写的是 seed 342（包括输出目录名和扫描随机种子）。
+- 如果你要跑 seed 142，请先把脚本中的 342 改为 142，再执行上面的命令。
+
 ## 主流程输出
 
 - 汇总文件：`reports/wf3y1y_polyfit_ma_strategy_summary.csv`

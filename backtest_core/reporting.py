@@ -196,6 +196,7 @@ def plot_daily_cumulative_return_comparison(
     strategy_obj: object | None = None,
     baseline_series: pd.Series | None = None,
     baseline_label: str = "策略基准累计收益",
+    signal_on_benchmark_curve: bool = True,
 ) -> pd.DataFrame:
     configure_chinese_font()
     strategy_daily = strategy_equity_curve["Equity"].pct_change().fillna(0.0)
@@ -242,11 +243,11 @@ def plot_daily_cumulative_return_comparison(
 
     if trade_frames:
         trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
-        strategy_line = compare["策略累计收益"]
-        entry_points = strategy_line.reindex(pd.to_datetime(trade_df["EntryTime"]), method="ffill").dropna()
+        marker_line = compare["长期持有累计收益"] if signal_on_benchmark_curve else compare["策略累计收益"]
+        entry_points = marker_line.reindex(pd.to_datetime(trade_df["EntryTime"]), method="ffill").dropna()
         closed_trade_df = trade_df.loc[~trade_df.get("IsOpen", False).fillna(False)]
-        exit_points = strategy_line.reindex(pd.to_datetime(closed_trade_df["ExitTime"]), method="ffill").dropna()
-        open_points = strategy_line.reindex(pd.to_datetime(trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"]), method="ffill").dropna()
+        exit_points = marker_line.reindex(pd.to_datetime(closed_trade_df["ExitTime"]), method="ffill").dropna()
+        open_points = marker_line.reindex(pd.to_datetime(trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"]), method="ffill").dropna()
         if not entry_points.empty:
             ax_main.scatter(entry_points.index, entry_points.values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
         if not exit_points.empty:
@@ -377,6 +378,26 @@ def _nearest_bar_index(index: pd.Index, ts: pd.Timestamp) -> int:
     return max(int(pos), 0)
 
 
+def _next_bar_timestamp(index: pd.Index, ts: pd.Timestamp) -> pd.Timestamp:
+    dt_index = pd.DatetimeIndex(index)
+    loc = dt_index.get_indexer([pd.Timestamp(ts)])[0]
+    if loc == -1:
+        loc = dt_index.get_indexer([pd.Timestamp(ts)], method="ffill")[0]
+    if loc == -1:
+        loc = _nearest_bar_index(dt_index, pd.Timestamp(ts))
+    if loc < len(dt_index) - 1:
+        return pd.Timestamp(dt_index[loc + 1])
+    return pd.Timestamp(dt_index[loc])
+
+
+def _normalize_native_reason_records(native_df: pd.DataFrame, bt_index: pd.Index) -> pd.DataFrame:
+    normalized = native_df.copy()
+    for col in ["EntryTime", "ExitTime"]:
+        if col in normalized.columns:
+            normalized[col] = pd.to_datetime(normalized[col]).map(lambda ts: _next_bar_timestamp(bt_index, ts))
+    return normalized
+
+
 def _join_reasons(reasons: list[str], fallback: str) -> str:
     unique_reasons = []
     for reason in reasons:
@@ -434,7 +455,14 @@ def _infer_grid_exit_reason(
         reasons.append(f"take_profit_grid(dev={dev_pct:.4%}>=tp={tp_threshold:.4%})")
     if dev_pct <= -sl_threshold:
         reasons.append(f"stop_loss_grid(dev={dev_pct:.4%}<=-{sl_threshold:.4%})")
-    return _join_reasons(reasons, "grid_exit_unclassified")
+    return _join_reasons(
+        reasons,
+        (
+            "grid_exit_no_rule_match("
+            f"dev={dev_pct:.4%};holding_days={holding_days};"
+            f"tp={tp_threshold:.4%};sl={sl_threshold:.4%})"
+        ),
+    )
 
 
 def _infer_switch_entry_reason(row: pd.Series, params: dict) -> str:
@@ -578,11 +606,17 @@ def export_trade_records_csv(
                 native_df[col] = pd.to_datetime(native_df[col])
         native_keep = [col for col in ["EntryTime", "ExitTime", "EntryReason", "ExitReason"] if col in native_df.columns]
         if {"EntryTime", "ExitTime", "EntryReason", "ExitReason"}.issubset(native_keep):
-            native_df = native_df[native_keep].drop_duplicates(subset=["EntryTime", "ExitTime"], keep="last")
+            if bt_data is not None and len(bt_data.index) > 1:
+                native_df = _normalize_native_reason_records(native_df[native_keep], bt_data.index)
+            else:
+                native_df = native_df[native_keep].copy()
+            native_df = native_df.drop_duplicates(subset=["EntryTime", "ExitTime"], keep="last")
             trade_df = trade_df.merge(native_df, on=["EntryTime", "ExitTime"], how="left", suffixes=("", "_native"))
             if "EntryReason_native" in trade_df.columns:
                 trade_df["EntryReason"] = trade_df.get("EntryReason").combine_first(trade_df["EntryReason_native"])
-                trade_df = trade_df.drop(columns=[col for col in ["EntryReason_native", "ExitReason_native"] if col in trade_df.columns])
+            if "ExitReason_native" in trade_df.columns:
+                trade_df["ExitReason"] = trade_df.get("ExitReason").combine_first(trade_df["ExitReason_native"])
+            trade_df = trade_df.drop(columns=[col for col in ["EntryReason_native", "ExitReason_native"] if col in trade_df.columns])
 
     if bt_data is not None and strategy_name is not None and params is not None:
         reason_df = infer_trade_record_reasons(trade_df, bt_data, strategy_name, params)
@@ -630,9 +664,13 @@ def write_window_comparison_summary_markdown(
         lines.append(f"## {section_title}")
         lines.append("")
         for image_path in image_paths:
+            try:
+                image_ref = image_path.resolve().relative_to(output_path.parent.resolve()).as_posix()
+            except ValueError:
+                image_ref = image_path.as_posix()
             lines.append(f"### {image_path.stem}")
             lines.append("")
-            lines.append(f"![{image_path.stem}]({image_path.name})")
+            lines.append(f"![{image_path.stem}]({image_ref})")
             lines.append("")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
