@@ -92,6 +92,8 @@ def add_strategy_features(
     data["PolyBasePred"] = pred
     data["PolySlope"] = slope
     data["PolyDevPct"] = data["Close"] / data["PolyBasePred"] - 1.0
+    for ma_window in [5, 10, 20, 60]:
+        data[f"MA{ma_window}"] = data["Close"].rolling(window=ma_window, min_periods=ma_window).mean()
     data["PolyDevTrend"] = data["PolyDevPct"].diff().ewm(
         span=max(3, int(trend_window_days)),
         adjust=False,
@@ -102,7 +104,7 @@ def add_strategy_features(
         min_periods=max(2, int(vol_window_days)),
     ).std(ddof=0)
 
-    feature_cols = ["PolyBasePred", "PolySlope", "PolyDevPct", "PolyDevTrend", "RollingVolPct"]
+    feature_cols = ["PolyBasePred", "PolySlope", "PolyDevPct", "MA5", "MA10", "MA20", "MA60", "PolyDevTrend", "RollingVolPct"]
     return data.dropna(subset=feature_cols)
 
 

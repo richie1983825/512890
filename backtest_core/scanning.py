@@ -7,10 +7,11 @@ import pandas as pd
 from backtesting import Backtest
 
 from strategies.moving_average_dynamic_grid_strategy import MovingAverageDynamicGridStrategy
+from strategies.polyfit_deviation_ma_switch_strategy import PolyfitDeviationMASwitchStrategy
 from strategies.polyfit_dynamic_grid_strategy import PolyfitDynamicGridStrategy
 
 from .data import add_ma_strategy_features, add_strategy_features
-from .parameters import sample_param_combinations, valid_ma_param_set, valid_polyfit_param_set
+from .parameters import sample_param_combinations, valid_ma_param_set, valid_polyfit_ma_switch_param_set, valid_polyfit_param_set
 
 
 def _score_scan_results(result_df: pd.DataFrame, base_data: pd.DataFrame) -> pd.DataFrame:
@@ -162,6 +163,72 @@ def scan_ma_parameters(
     result_df = pd.DataFrame(results)
     if result_df.empty:
         raise ValueError("MA 基准策略训练参数扫描结果为空，请检查 MA 窗口与样本长度")
+
+    scored = _score_scan_results(result_df, base_data)
+    return scored.iloc[0].to_dict(), scored
+
+
+def scan_polyfit_ma_switch_parameters(
+    base_data: pd.DataFrame,
+    param_space: dict[str, list],
+    max_evals: int = 800,
+    random_seed: int = 42,
+) -> tuple[dict, pd.DataFrame]:
+    selected = sample_param_combinations(
+        param_space,
+        max_evals=max_evals,
+        random_seed=random_seed,
+        validator=valid_polyfit_ma_switch_param_set,
+    )
+
+    feature_cache: dict[tuple[int, int, int], pd.DataFrame] = {}
+    results = []
+    start = time.time()
+
+    for i, params in enumerate(selected, start=1):
+        key = (
+            int(params["fit_window_days"]),
+            int(params["trend_window_days"]),
+            int(params["vol_window_days"]),
+        )
+        if key not in feature_cache:
+            feature_cache[key] = add_strategy_features(base_data, key[0], key[1], key[2])
+
+        bt_data = feature_cache[key]
+        if bt_data.empty:
+            continue
+
+        bt = Backtest(
+            bt_data,
+            PolyfitDeviationMASwitchStrategy,
+            cash=100000,
+            commission=0.0001,
+            exclusive_orders=True,
+            finalize_trades=True,
+        )
+        strategy_kwargs = {
+            key_name: value
+            for key_name, value in params.items()
+            if key_name not in {"fit_window_days", "trend_window_days", "vol_window_days"}
+        }
+        stats = bt.run(**strategy_kwargs)
+        results.append(
+            {
+                **params,
+                "Return [%]": float(stats["Return [%]"]),
+                "Return (Ann.) [%]": float(stats["Return (Ann.) [%]"]),
+                "Max. Drawdown [%]": float(stats["Max. Drawdown [%]"]),
+                "# Trades": int(stats["# Trades"]),
+            }
+        )
+
+        if i % 200 == 0 or i == len(selected):
+            elapsed = time.time() - start
+            print(f"Polyfit 偏离度+MA切换策略训练集扫描进度: {i}/{len(selected)}，耗时 {elapsed:.1f}s")
+
+    result_df = pd.DataFrame(results)
+    if result_df.empty:
+        raise ValueError("Polyfit 偏离度+MA切换策略训练参数扫描结果为空，请检查参数范围")
 
     scored = _score_scan_results(result_df, base_data)
     return scored.iloc[0].to_dict(), scored

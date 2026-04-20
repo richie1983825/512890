@@ -20,6 +20,15 @@ POLYFIT_SCAN_PARAM_NAMES = [
     "position_sizing_coef",
 ]
 
+POLYFIT_MA_SWITCH_SCAN_PARAM_NAMES = [
+    *POLYFIT_SCAN_PARAM_NAMES,
+    "flat_wait_days",
+    "switch_deviation_m1",
+    "switch_deviation_m2",
+    "switch_fast_ma_window",
+    "switch_slow_ma_window",
+]
+
 MA_SCAN_PARAM_NAMES = [
     "ma_window_days",
     "trend_window_days",
@@ -55,6 +64,30 @@ def build_param_space() -> dict[str, list]:
         "position_size": [i / 100 for i in range(0, 101)],
         "position_sizing_coef": [10.0, 20.0, 30.0, 40.0, 60.0],
     }
+
+
+def build_polyfit_ma_switch_param_space() -> dict[str, list]:
+    param_space = build_param_space()
+    param_space.update(
+        {
+            "flat_wait_days": [5, 8, 10, 15],
+            "switch_deviation_m1": [0.02, 0.03, 0.04, 0.05],
+            "switch_deviation_m2": [0.005, 0.01, 0.015, 0.02],
+            "switch_fast_ma_window": [5, 10, 20],
+            "switch_slow_ma_window": [10, 20, 60],
+        }
+    )
+    return param_space
+
+
+def build_fixed_polyfit_ma_switch_param_space(
+    base_polyfit_params: dict,
+    switch_param_space: dict[str, list] | None = None,
+) -> dict[str, list]:
+    param_space = dict((switch_param_space or build_polyfit_ma_switch_param_space()).items())
+    for name in POLYFIT_SCAN_PARAM_NAMES:
+        param_space[name] = [base_polyfit_params[name]]
+    return param_space
 
 
 def build_fixed_polyfit_param_space(
@@ -109,6 +142,17 @@ def valid_polyfit_param_set(params: dict) -> bool:
         and params["min_signal_strength"] > 0
         and 0 <= params["position_size"] <= 1
         and params["position_sizing_coef"] > 0
+    )
+
+
+def valid_polyfit_ma_switch_param_set(params: dict) -> bool:
+    return (
+        valid_polyfit_param_set(params)
+        and params["flat_wait_days"] >= 0
+        and params["switch_deviation_m1"] > 0
+        and params["switch_deviation_m2"] >= 0
+        and params["switch_deviation_m2"] < params["switch_deviation_m1"]
+        and int(params["switch_fast_ma_window"]) < int(params["switch_slow_ma_window"])
     )
 
 

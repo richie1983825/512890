@@ -74,15 +74,26 @@ def calc_daily_position_ratio(
     strategy_equity_curve: pd.DataFrame,
     benchmark_close: pd.Series,
     trades: pd.DataFrame | None = None,
+    strategy_obj: object | None = None,
 ) -> pd.Series:
     index = strategy_equity_curve.index
     position_ratio = pd.Series(0.0, index=index, dtype=float)
-    if trades is None or len(trades) == 0:
+    trade_frames: list[pd.DataFrame] = []
+    if trades is not None and len(trades) > 0:
+        trade_df = trades.copy()
+        trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
+        trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+        trade_df["IsOpen"] = False
+        trade_frames.append(trade_df)
+
+    open_trade_df = _build_open_trade_frame(strategy_obj, benchmark_close)
+    if len(open_trade_df) > 0:
+        trade_frames.append(open_trade_df)
+
+    if not trade_frames:
         return position_ratio
 
-    trade_df = trades.copy()
-    trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
-    trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+    trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
     close = benchmark_close.reindex(index).ffill().bfill()
     equity = strategy_equity_curve["Equity"].reindex(index).ffill().bfill()
 
@@ -92,13 +103,68 @@ def calc_daily_position_ratio(
         size = float(abs(trade.get("Size", 0.0)))
         if size <= 0:
             continue
-        active_mask = (index >= entry_time) & (index < exit_time)
+        if bool(trade.get("IsOpen", False)):
+            active_mask = (index >= entry_time) & (index <= exit_time)
+        else:
+            active_mask = (index >= entry_time) & (index < exit_time)
         if not active_mask.any():
             continue
         notional = size * close.loc[active_mask]
         position_ratio.loc[active_mask] += notional / equity.loc[active_mask].replace(0.0, np.nan)
 
     return position_ratio.fillna(0.0).clip(lower=0.0)
+
+
+def _build_open_trade_frame(
+    strategy_obj: object | None,
+    bt_data: pd.DataFrame | pd.Series,
+) -> pd.DataFrame:
+    if strategy_obj is None:
+        return pd.DataFrame()
+
+    open_trades = getattr(strategy_obj, "trades", None)
+    if not open_trades:
+        return pd.DataFrame()
+
+    if isinstance(bt_data, pd.DataFrame):
+        end_index = bt_data.index
+        close_series = bt_data["Close"]
+    else:
+        end_index = bt_data.index
+        close_series = bt_data
+
+    if len(end_index) == 0:
+        return pd.DataFrame()
+
+    end_time = pd.Timestamp(end_index[-1])
+    end_close = float(close_series.iloc[-1])
+    current_entry_reason = getattr(strategy_obj, "current_entry_reason", "") or "entry_runtime_unknown"
+
+    rows: list[dict[str, object]] = []
+    for trade in open_trades:
+        size = float(abs(getattr(trade, "size", 0.0) or 0.0))
+        if size <= 0:
+            continue
+        rows.append(
+            {
+                "EntryTime": pd.Timestamp(getattr(trade, "entry_time", end_time)),
+                "ExitTime": end_time,
+                "Size": size,
+                "EntryPrice": float(getattr(trade, "entry_price", end_close) or end_close),
+                "ExitPrice": end_close,
+                "PnL": float(getattr(trade, "pl", 0.0) or 0.0),
+                "ReturnPct": float(getattr(trade, "pl_pct", 0.0) or 0.0),
+                "EntryBar": getattr(trade, "entry_bar", np.nan),
+                "ExitBar": len(end_index) - 1,
+                "Tag": getattr(trade, "tag", None),
+                "EntryReason": current_entry_reason,
+                "ExitReason": "open_at_period_end",
+                "TradeStatus": "open_at_period_end",
+                "IsOpen": True,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def _title_with_year(title: str, index: pd.Index) -> str:
@@ -127,6 +193,7 @@ def plot_daily_cumulative_return_comparison(
     title: str,
     output_path: Path,
     trades: pd.DataFrame | None = None,
+    strategy_obj: object | None = None,
     baseline_series: pd.Series | None = None,
     baseline_label: str = "策略基准累计收益",
 ) -> pd.DataFrame:
@@ -136,7 +203,12 @@ def plot_daily_cumulative_return_comparison(
     strategy_cum = (1 + strategy_daily).cumprod() - 1
     buy_hold_cum = (1 + buy_hold_daily).cumprod() - 1
     compare = pd.DataFrame({"策略累计收益": strategy_cum, "长期持有累计收益": buy_hold_cum})
-    compare["策略仓位"] = calc_daily_position_ratio(strategy_equity_curve, benchmark_close, trades=trades)
+    compare["策略仓位"] = calc_daily_position_ratio(
+        strategy_equity_curve,
+        benchmark_close,
+        trades=trades,
+        strategy_obj=strategy_obj,
+    )
 
     if baseline_series is not None:
         baseline = baseline_series.reindex(compare.index).ffill().bfill()
@@ -156,17 +228,31 @@ def plot_daily_cumulative_return_comparison(
     if baseline_series is not None and baseline_label in compare.columns:
         ax_main.plot(compare.index, compare[baseline_label] * 100, label=baseline_label, color="#ff7f0e", linewidth=1.1, linestyle="--")
 
+    trade_frames: list[pd.DataFrame] = []
     if trades is not None and len(trades) > 0:
         trade_df = trades.copy()
         trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
         trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
-        line = compare["长期持有累计收益"]
-        entry_points = line.reindex(trade_df["EntryTime"], method="ffill").dropna()
-        exit_points = line.reindex(trade_df["ExitTime"], method="ffill").dropna()
+        trade_df["IsOpen"] = False
+        trade_frames.append(trade_df)
+
+    open_trade_df = _build_open_trade_frame(strategy_obj, benchmark_close)
+    if len(open_trade_df) > 0:
+        trade_frames.append(open_trade_df)
+
+    if trade_frames:
+        trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
+        strategy_line = compare["策略累计收益"]
+        entry_points = strategy_line.reindex(pd.to_datetime(trade_df["EntryTime"]), method="ffill").dropna()
+        closed_trade_df = trade_df.loc[~trade_df.get("IsOpen", False).fillna(False)]
+        exit_points = strategy_line.reindex(pd.to_datetime(closed_trade_df["ExitTime"]), method="ffill").dropna()
+        open_points = strategy_line.reindex(pd.to_datetime(trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"]), method="ffill").dropna()
         if not entry_points.empty:
             ax_main.scatter(entry_points.index, entry_points.values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
         if not exit_points.empty:
             ax_main.scatter(exit_points.index, exit_points.values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
+        if not open_points.empty:
+            ax_main.scatter(open_points.index, open_points.values * 100, marker="s", color="#8c564b", s=32, label="期末持有", zorder=6)
 
     ax_main.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
     ax_main.set_title(_title_with_year(title, compare.index))
@@ -227,6 +313,7 @@ def plot_multi_strategy_cumulative_comparison(
 def print_daily_cumulative_returns_with_signals(
     compare: pd.DataFrame,
     trades: pd.DataFrame | None = None,
+    strategy_obj: object | None = None,
     label: str | None = None,
     max_rows: int = 120,
 ) -> None:
@@ -237,21 +324,37 @@ def print_daily_cumulative_returns_with_signals(
     report = compare.copy()
     report["买点"] = ""
     report["卖点"] = ""
+    report["持有状态"] = ""
 
+    trade_frames: list[pd.DataFrame] = []
     if trades is not None and len(trades) > 0:
         trade_df = trades.copy()
         trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
         trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+        trade_df["IsOpen"] = False
+        trade_frames.append(trade_df)
+
+    open_trade_df = _build_open_trade_frame(strategy_obj, compare["策略累计收益"])
+    if len(open_trade_df) > 0:
+        trade_frames.append(open_trade_df)
+
+    if trade_frames:
+        trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
 
         for ts, count in trade_df.groupby("EntryTime").size().items():
             pos = report.index.get_indexer([ts], method="nearest")[0]
             if pos >= 0:
                 report.iloc[pos, report.columns.get_loc("买点")] = f"买入x{int(count)}"
 
-        for ts, count in trade_df.groupby("ExitTime").size().items():
+        closed_trade_df = trade_df.loc[~trade_df.get("IsOpen", False).fillna(False)]
+        for ts, count in closed_trade_df.groupby("ExitTime").size().items():
             pos = report.index.get_indexer([ts], method="nearest")[0]
             if pos >= 0:
                 report.iloc[pos, report.columns.get_loc("卖点")] = f"卖出x{int(count)}"
+
+        open_trade_count = int(trade_df.get("IsOpen", pd.Series(dtype=bool)).fillna(False).sum())
+        if open_trade_count > 0 and len(report.index) > 0:
+            report.iloc[-1, report.columns.get_loc("持有状态")] = f"期末持有x{open_trade_count}"
 
     out = report.copy()
     out.index = pd.to_datetime(out.index).strftime("%Y-%m-%d")
@@ -334,6 +437,42 @@ def _infer_grid_exit_reason(
     return _join_reasons(reasons, "grid_exit_unclassified")
 
 
+def _infer_switch_entry_reason(row: pd.Series, params: dict) -> str:
+    close = float(row["Close"])
+    base_value = float(row["PolyBasePred"])
+    dev_pct = float(row["PolyDevPct"])
+    fast_window = int(params["switch_fast_ma_window"])
+    slow_window = int(params["switch_slow_ma_window"])
+    fast_ma = float(row[f"MA{fast_window}"])
+    slow_ma = float(row[f"MA{slow_window}"])
+
+    if close > base_value and dev_pct > float(params["switch_deviation_m1"]) and fast_ma > slow_ma:
+        return (
+            f"deviation_ma_switch_buy;base={base_value:.4f};close={close:.4f};dev={dev_pct:.4%};"
+            f"ma{fast_window}={fast_ma:.4f};ma{slow_window}={slow_ma:.4f};m1={float(params['switch_deviation_m1']):.4%}"
+        )
+
+    return _infer_grid_entry_reason(row, params, "PolyBasePred", "PolyDevPct", "PolyDevTrend")
+
+
+def _infer_switch_exit_reason(row: pd.Series, entry_row: pd.Series, params: dict, holding_days: int) -> str:
+    close = float(row["Close"])
+    base_value = float(row["PolyBasePred"])
+    dev_pct = float(row["PolyDevPct"])
+    fast_window = int(params["switch_fast_ma_window"])
+    slow_window = int(params["switch_slow_ma_window"])
+    fast_ma = float(row[f"MA{fast_window}"])
+    slow_ma = float(row[f"MA{slow_window}"])
+
+    if close > base_value and dev_pct > float(params["switch_deviation_m1"]) and fast_ma < slow_ma:
+        return (
+            f"deviation_ma_switch_sell;base={base_value:.4f};close={close:.4f};dev={dev_pct:.4%};"
+            f"ma{fast_window}={fast_ma:.4f};ma{slow_window}={slow_ma:.4f};m1={float(params['switch_deviation_m1']):.4%}"
+        )
+
+    return _infer_grid_exit_reason(row, entry_row, params, "PolyDevPct", "PolyDevTrend", holding_days)
+
+
 def infer_trade_record_reasons(
     trades: pd.DataFrame | None,
     bt_data: pd.DataFrame,
@@ -363,6 +502,9 @@ def infer_trade_record_reasons(
         elif strategy_name == "ma":
             entry_reason = "initial_position_carry" if entry_bar == 0 else _infer_grid_entry_reason(entry_row, params, "MABase", "MADevPct", "MADevTrend")
             exit_reason = _infer_grid_exit_reason(exit_row, entry_row, params, "MADevPct", "MADevTrend", holding_days)
+        elif strategy_name == "polyfit_switch":
+            entry_reason = "initial_position_carry" if entry_bar == 0 else _infer_switch_entry_reason(entry_row, params)
+            exit_reason = _infer_switch_exit_reason(exit_row, entry_row, params, holding_days)
         else:
             entry_reason = "entry_unclassified"
             exit_reason = "exit_unclassified"
@@ -381,8 +523,11 @@ def export_trade_records_csv(
     strategy_name: str | None = None,
     params: dict | None = None,
     native_reason_records: list[dict] | None = None,
+    strategy_obj: object | None = None,
 ) -> pd.DataFrame:
-    if trades is None or len(trades) == 0:
+    open_trade_df = _build_open_trade_frame(strategy_obj, bt_data) if bt_data is not None else pd.DataFrame()
+
+    if (trades is None or len(trades) == 0) and len(open_trade_df) == 0:
         empty = pd.DataFrame(
             columns=[
                 "EntryTime",
@@ -394,6 +539,7 @@ def export_trade_records_csv(
                 "PnL",
                 "ReturnPct",
                 "HoldingDays",
+                "TradeStatus",
                 "EntryReason",
                 "ExitReason",
             ]
@@ -401,10 +547,18 @@ def export_trade_records_csv(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         empty.to_csv(output_path, index=False, encoding="utf-8-sig")
         return empty
+    trade_frames: list[pd.DataFrame] = []
+    if trades is not None and len(trades) > 0:
+        trade_df = trades.copy()
+        trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
+        trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+        trade_df["TradeStatus"] = "closed"
+        trade_df["IsOpen"] = False
+        trade_frames.append(trade_df)
+    if len(open_trade_df) > 0:
+        trade_frames.append(open_trade_df)
 
-    trade_df = trades.copy()
-    trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
-    trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+    trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
     trade_df["HoldingDays"] = (trade_df["ExitTime"] - trade_df["EntryTime"]).dt.days.clip(lower=1)
     trade_df["EntryPositionPct"] = np.nan
 
@@ -450,6 +604,7 @@ def export_trade_records_csv(
             "PnL",
             "ReturnPct",
             "HoldingDays",
+            "TradeStatus",
             "EntryReason",
             "ExitReason",
             "Tag",

@@ -6,6 +6,22 @@ Use this file to append one record after each backtest run. Keep entries in reve
 
 | Date | Round | Strategy | Return | Max Drawdown | Excess Return | Trades | Holding Days |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-04 | PolyfitDeviationMASwitchStrategy | 14.47% | -6.38% | 7.66% | 32 | 17.56 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-04 | PolyfitDynamicGridStrategy | 10.23% | -3.82% | 3.42% | 28 | 9.29 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-03 | PolyfitDeviationMASwitchStrategy | 35.76% | -8.86% | 14.25% | 41 | 5.49 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-03 | PolyfitDynamicGridStrategy | 29.34% | -7.08% | 7.83% | 40 | 3.00 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-02 | PolyfitDeviationMASwitchStrategy | 1.65% | -12.35% | -9.54% | 48 | 9.12 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-02 | PolyfitDynamicGridStrategy | -2.43% | -5.68% | -13.62% | 43 | 3.23 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-01 | PolyfitDeviationMASwitchStrategy | 27.48% | -7.31% | 26.37% | 15 | 35.33 |
+| 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-01 | PolyfitDynamicGridStrategy | 27.48% | -7.31% | 26.37% | 15 | 35.33 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-04 | PolyfitDeviationMASwitchStrategy | 1.03% | -4.17% | -5.78% | 30 | 15.33 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-04 | PolyfitDynamicGridStrategy | 8.07% | -4.17% | 1.26% | 26 | 15.96 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-03 | PolyfitDeviationMASwitchStrategy | 22.41% | -5.55% | 0.89% | 45 | 4.78 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-03 | PolyfitDynamicGridStrategy | 22.41% | -5.55% | 0.89% | 41 | 3.44 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-02 | PolyfitDeviationMASwitchStrategy | 4.42% | -5.25% | -6.77% | 14 | 23.14 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-02 | PolyfitDynamicGridStrategy | 3.15% | -5.25% | -8.04% | 11 | 21.36 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-01 | PolyfitDeviationMASwitchStrategy | 27.20% | -10.61% | 26.09% | 37 | 11.89 |
+| 2026-04-19 | wf3y1y-polyfit-switch-window-01 | PolyfitDynamicGridStrategy | 27.20% | -10.61% | 26.09% | 34 | 12.24 |
 | 2026-04-19 | wf3y1y-polyfit-ma-window-01 | MovingAverageDynamicGridStrategy | 36.43% | -5.86% | 35.32% | 15 | 14.53 |
 | 2026-04-19 | wf3y1y-polyfit-ma-window-01 | PolyfitDynamicGridStrategy | 27.20% | -10.61% | 26.09% | 34 | 12.24 |
 | 2026-04-19 | wf3y1y-polyfit-ma-window-03 | PolyfitDynamicGridStrategy | 22.41% | -5.55% | 0.89% | 41 | 3.44 |
