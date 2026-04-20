@@ -6,6 +6,30 @@ Use this file to append one record after each backtest run. Keep entries in reve
 
 | Date | Round | Strategy | Return | Max Drawdown | Excess Return | Trades | Holding Days |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-04 | PolyfitDeviationMASwitchStrategy | -0.44% | -6.57% | -7.25% | 10 | 41.00 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-04 | PolyfitDynamicGridStrategy | 6.65% | -5.91% | -0.16% | 9 | 33.33 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-03 | PolyfitDeviationMASwitchStrategy | 25.93% | -12.78% | 4.41% | 33 | 12.94 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-03 | PolyfitDynamicGridStrategy | 33.17% | -4.46% | 11.66% | 36 | 4.00 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-02 | PolyfitDeviationMASwitchStrategy | 2.41% | -9.64% | -8.79% | 33 | 7.45 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-02 | PolyfitDynamicGridStrategy | -0.22% | -5.52% | -11.41% | 34 | 5.94 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-01 | PolyfitDeviationMASwitchStrategy | 4.28% | -9.91% | 3.17% | 13 | 19.23 |
+| 2026-04-20 | wf3y1y-switch-prevdayup-window-01 | PolyfitDynamicGridStrategy | 12.64% | -7.85% | 11.53% | 13 | 24.31 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-04 | PolyfitDeviationMASwitchStrategy | 2.87% | -5.63% | -3.95% | 8 | 35.00 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-04 | PolyfitDynamicGridStrategy | 6.65% | -5.91% | -0.16% | 9 | 33.33 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-03 | PolyfitDeviationMASwitchStrategy | 8.92% | -5.63% | -12.59% | 20 | 10.15 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-03 | PolyfitDynamicGridStrategy | 33.17% | -4.46% | 11.66% | 36 | 4.00 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-02 | PolyfitDeviationMASwitchStrategy | 5.10% | -7.34% | -6.09% | 20 | 9.50 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-02 | PolyfitDynamicGridStrategy | -0.22% | -5.52% | -11.41% | 34 | 5.94 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-01 | PolyfitDeviationMASwitchStrategy | -3.57% | -12.12% | -4.68% | 12 | 20.92 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-mawindow-01 | PolyfitDynamicGridStrategy | 12.64% | -7.85% | 11.53% | 13 | 24.31 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-04 | PolyfitDeviationMASwitchStrategy | 2.87% | -5.16% | -3.95% | 8 | 35.00 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-04 | PolyfitDynamicGridStrategy | 6.65% | -5.91% | -0.16% | 9 | 33.33 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-03 | PolyfitDeviationMASwitchStrategy | 8.92% | -5.63% | -12.59% | 20 | 10.15 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-03 | PolyfitDynamicGridStrategy | 33.17% | -4.46% | 11.66% | 36 | 4.00 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-02 | PolyfitDeviationMASwitchStrategy | 5.10% | -7.34% | -6.09% | 20 | 9.50 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-02 | PolyfitDynamicGridStrategy | -0.22% | -5.52% | -11.41% | 34 | 5.94 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-01 | PolyfitDeviationMASwitchStrategy | 8.38% | -7.85% | 7.27% | 11 | 20.09 |
+| 2026-04-20 | wf3y1y-switch-stoploss-reentry-window-01 | PolyfitDynamicGridStrategy | 12.64% | -7.85% | 11.53% | 13 | 24.31 |
 | 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-04 | PolyfitDeviationMASwitchStrategy | 14.47% | -6.38% | 7.66% | 32 | 17.56 |
 | 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-04 | PolyfitDynamicGridStrategy | 10.23% | -3.82% | 3.42% | 28 | 9.29 |
 | 2026-04-20 | wf3y1y-polyfit-switch-hold45-window-03 | PolyfitDeviationMASwitchStrategy | 35.76% | -8.86% | 14.25% | 41 | 5.49 |

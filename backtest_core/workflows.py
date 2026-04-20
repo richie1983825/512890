@@ -9,6 +9,7 @@ from .backtests import (
     extract_ending_position,
     initial_position_from_deviation,
     run_ma_strategy_backtest,
+    run_polyfit_ma_stoploss_nextday_guard_backtest,
     run_polyfit_ma_switch_backtest,
     run_strategy_backtest,
 )
@@ -30,7 +31,7 @@ from .reporting import (
     summarize_backtest_metrics,
     write_window_comparison_summary_markdown,
 )
-from .scanning import scan_ma_parameters, scan_parameters, scan_polyfit_ma_switch_parameters
+from .scanning import scan_ma_parameters, scan_parameters, scan_polyfit_ma_stoploss_nextday_guard_parameters, scan_polyfit_ma_switch_parameters
 
 
 def build_rolling_splits_3y1y(data: pd.DataFrame) -> list[tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]]:
@@ -895,6 +896,196 @@ def run_polyfit_switch_comparison_3y1y(
             reports / "wf3y1y_polyfit_switch_comparison_summary.md",
             title="Polyfit vs 偏离度+MA切换策略 3年训练1年验证图表汇总",
             sections=[("窗口对比图", annual_images), ("切换策略每日累计收益图", daily_images)],
+        )
+
+    return pd.DataFrame(rows)
+
+
+def run_polyfit_stoploss_nextday_guard_switch_comparison_3y1y(
+    base_data: pd.DataFrame,
+    switch_param_space: dict[str, list],
+    guard_switch_param_space: dict[str, list],
+    max_evals: int = 800,
+    random_seed: int = 42,
+    generate_artifacts: bool = True,
+    reports_dir: Path | None = None,
+    polyfit_fixed_params: dict | None = None,
+) -> pd.DataFrame:
+    reports = reports_dir or (Path(__file__).resolve().parent.parent / "reports")
+    if generate_artifacts:
+        reports.mkdir(parents=True, exist_ok=True)
+
+    rows: list[dict] = []
+    switch_prev_ending_position: float | None = None
+    guard_prev_ending_position: float | None = None
+    annual_images: list[Path] = []
+    daily_images: list[Path] = []
+
+    for window_idx, (train_start, train_end, val_start, val_end) in enumerate(build_rolling_splits_3y1y(base_data), start=1):
+        train_df = base_data.loc[(base_data.index >= train_start) & (base_data.index <= train_end)]
+        val_df = base_data.loc[(base_data.index >= val_start) & (base_data.index <= val_end)]
+
+        print(
+            f"\n===== Switch vs 止损次日偏离度保护策略 3年训练1年验证 {window_idx} =====\n"
+            f"训练区间: {train_start.date()} -> {train_end.date()}\n"
+            f"验证区间: {val_start.date()} -> {val_end.date()}"
+        )
+
+        if polyfit_fixed_params is None:
+            switch_best_params, switch_scan_df = scan_polyfit_ma_switch_parameters(
+                train_df,
+                switch_param_space,
+                max_evals=max_evals,
+                random_seed=random_seed + window_idx,
+            )
+        else:
+            switch_best_params = dict(polyfit_fixed_params)
+            switch_scan_df = pd.DataFrame([switch_best_params])
+
+        fixed_guard_param_space = build_fixed_polyfit_ma_switch_param_space(switch_best_params, guard_switch_param_space)
+        guard_best_params, guard_scan_df = scan_polyfit_ma_stoploss_nextday_guard_parameters(
+            train_df,
+            fixed_guard_param_space,
+            max_evals=max_evals,
+            random_seed=random_seed + 9_000 + window_idx,
+        )
+
+        switch_initial_position = _resolve_initial_position(
+            switch_prev_ending_position,
+            train_df,
+            val_df,
+            switch_best_params,
+            add_strategy_features,
+            (int(switch_best_params["fit_window_days"]), int(switch_best_params["trend_window_days"]), int(switch_best_params["vol_window_days"])),
+            "PolyDevPct",
+        )
+        guard_initial_position = _resolve_initial_position(
+            guard_prev_ending_position,
+            train_df,
+            val_df,
+            guard_best_params,
+            add_strategy_features,
+            (int(guard_best_params["fit_window_days"]), int(guard_best_params["trend_window_days"]), int(guard_best_params["vol_window_days"])),
+            "PolyDevPct",
+        )
+
+        switch_stats, switch_val_data = run_polyfit_ma_switch_backtest(
+            val_df,
+            switch_best_params,
+            warmup_data=train_df,
+            initial_position=switch_initial_position,
+        )
+        guard_stats, guard_val_data = run_polyfit_ma_stoploss_nextday_guard_backtest(val_df, guard_best_params, warmup_data=train_df, initial_position=guard_initial_position)
+        switch_prev_ending_position = extract_ending_position(switch_stats)
+        guard_prev_ending_position = extract_ending_position(guard_stats)
+
+        if generate_artifacts:
+            switch_annual_png = reports / f"wf3y1y_{window_idx:02d}_switch_annual_return_comparison.png"
+            switch_daily_png = reports / f"wf3y1y_{window_idx:02d}_switch_daily_cumulative_return_comparison.png"
+            guard_annual_png = reports / f"wf3y1y_{window_idx:02d}_guard_switch_annual_return_comparison.png"
+            guard_daily_png = reports / f"wf3y1y_{window_idx:02d}_guard_switch_daily_cumulative_return_comparison.png"
+            pair_daily_png = reports / f"wf3y1y_{window_idx:02d}_switch_guard_switch_pair_daily_comparison.png"
+            switch_scan_csv = reports / f"wf3y1y_{window_idx:02d}_switch_train_scan_top50.csv"
+            guard_scan_csv = reports / f"wf3y1y_{window_idx:02d}_guard_switch_train_scan_top50.csv"
+            switch_trades_csv = reports / f"wf3y1y_{window_idx:02d}_switch_trade_records.csv"
+            guard_trades_csv = reports / f"wf3y1y_{window_idx:02d}_guard_switch_trade_records.csv"
+
+            plot_annual_return_comparison(
+                strategy_equity_curve=switch_stats["_equity_curve"],
+                benchmark_close=switch_val_data["Close"],
+                title=f"窗口{window_idx}: Switch策略 vs 长期持有（年度独立收益）",
+                output_path=switch_annual_png,
+            )
+            plot_daily_cumulative_return_comparison(
+                strategy_equity_curve=switch_stats["_equity_curve"],
+                benchmark_close=switch_val_data["Close"],
+                title=f"窗口{window_idx}: Switch策略 vs 长期持有（每日累计收益）",
+                output_path=switch_daily_png,
+                trades=switch_stats["_trades"],
+                strategy_obj=switch_stats.get("_strategy"),
+                baseline_series=switch_val_data["PolyBasePred"],
+                baseline_label="Polyfit基准累计收益",
+            )
+            plot_annual_return_comparison(
+                strategy_equity_curve=guard_stats["_equity_curve"],
+                benchmark_close=guard_val_data["Close"],
+                title=f"窗口{window_idx}: 止损次日偏离度保护策略 vs 长期持有（年度独立收益）",
+                output_path=guard_annual_png,
+            )
+            plot_daily_cumulative_return_comparison(
+                strategy_equity_curve=guard_stats["_equity_curve"],
+                benchmark_close=guard_val_data["Close"],
+                title=f"窗口{window_idx}: 止损次日偏离度保护策略 vs 长期持有（每日累计收益）",
+                output_path=guard_daily_png,
+                trades=guard_stats["_trades"],
+                strategy_obj=guard_stats.get("_strategy"),
+                baseline_series=guard_val_data["PolyBasePred"],
+                baseline_label="Polyfit基准累计收益",
+            )
+            plot_multi_strategy_cumulative_comparison(
+                strategy_curves={
+                    "Switch策略累计收益": switch_stats["_equity_curve"],
+                    "止损次日偏离度保护策略累计收益": guard_stats["_equity_curve"],
+                },
+                benchmark_close=val_df["Close"],
+                title=f"窗口{window_idx}: Switch策略 vs 止损次日偏离度保护策略 vs 长期持有",
+                output_path=pair_daily_png,
+            )
+            switch_scan_df.head(50).to_csv(switch_scan_csv, index=False, encoding="utf-8-sig")
+            guard_scan_df.head(50).to_csv(guard_scan_csv, index=False, encoding="utf-8-sig")
+            export_trade_records_csv(
+                switch_stats["_trades"],
+                switch_trades_csv,
+                bt_data=switch_val_data,
+                equity_curve=switch_stats["_equity_curve"],
+                strategy_name="polyfit_ma_switch",
+                params=switch_best_params,
+                native_reason_records=getattr(switch_stats.get("_strategy"), "trade_reason_records", None),
+                strategy_obj=switch_stats.get("_strategy"),
+            )
+            export_trade_records_csv(
+                guard_stats["_trades"],
+                guard_trades_csv,
+                bt_data=guard_val_data,
+                equity_curve=guard_stats["_equity_curve"],
+                strategy_name="polyfit_stoploss_nextday_guard_switch",
+                params=guard_best_params,
+                native_reason_records=getattr(guard_stats.get("_strategy"), "trade_reason_records", None),
+                strategy_obj=guard_stats.get("_strategy"),
+            )
+            annual_images.append(pair_daily_png)
+            daily_images.append(guard_daily_png)
+
+        switch_metrics = summarize_backtest_metrics(switch_stats, switch_val_data["Close"])
+        guard_metrics = summarize_backtest_metrics(guard_stats, guard_val_data["Close"])
+        rows.append(
+            {
+                "窗口": window_idx,
+                "训练开始": str(train_start.date()),
+                "训练结束": str(train_end.date()),
+                "验证开始": str(val_start.date()),
+                "验证结束": str(val_end.date()),
+                **{f"switch_{name}": switch_best_params[name] for name in POLYFIT_MA_SWITCH_SCAN_PARAM_NAMES},
+                **{f"guard_switch_{name}": guard_best_params[name] for name in POLYFIT_MA_SWITCH_SCAN_PARAM_NAMES},
+                **{f"switch_{key}": value for key, value in switch_metrics.items()},
+                **{f"guard_switch_{key}": value for key, value in guard_metrics.items()},
+                "switch_初始仓位": switch_initial_position,
+                "switch_结束仓位": switch_prev_ending_position,
+                "guard_switch_初始仓位": guard_initial_position,
+                "guard_switch_结束仓位": guard_prev_ending_position,
+                "guard_switch优于switch_超额收益差": guard_metrics["超额收益"] - switch_metrics["超额收益"],
+                "guard_switch优于switch_总收益差": guard_metrics["总收益率"] - switch_metrics["总收益率"],
+            }
+        )
+
+        print(f"窗口{window_idx} Switch策略总收益率: {switch_metrics['总收益率'] * 100:.2f}%")
+        print(f"窗口{window_idx} 止损次日偏离度保护策略总收益率: {guard_metrics['总收益率'] * 100:.2f}%")
+
+    if generate_artifacts and len(annual_images) == 4 and len(daily_images) == 4:
+        write_window_comparison_summary_markdown(
+            reports / "wf3y1y_polyfit_stoploss_nextday_guard_switch_comparison_summary.md",
+            title="Switch vs 止损次日偏离度保护策略 3年训练1年验证图表汇总",
+            sections=[("窗口对比图", annual_images), ("止损次日偏离度保护策略每日累计收益图", daily_images)],
         )
 
     return pd.DataFrame(rows)
