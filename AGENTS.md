@@ -37,6 +37,8 @@
 
 ## Backtest Output Requirements
 
+- All chart X-axes must be plotted by trading days (bar index order), not natural calendar-day spacing.
+
 - After every backtest run, always generate and save these two comparison charts:
 	- Strategy vs Buy-and-Hold annual return comparison chart.
 	- Strategy vs Buy-and-Hold daily cumulative return comparison chart, with buy/sell markers.

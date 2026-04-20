@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 import numpy as np
@@ -175,16 +174,28 @@ def _title_with_year(title: str, index: pd.Index) -> str:
     return f"{year_text} {title}"
 
 
-def _configure_dense_date_axis(ax: plt.Axes, index: pd.Index) -> None:
+def _configure_trading_day_axis(ax: plt.Axes, index: pd.Index) -> None:
     dt_index = pd.to_datetime(index)
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m月"))
-    ax.set_xticks(mdates.date2num(dt_index.to_pydatetime()), minor=True)
-    ax.tick_params(axis="x", rotation=30, labelsize=9)
-    ax.tick_params(axis="x", which="minor", length=2, color="#999999")
-    ax.set_xlim(dt_index.min(), dt_index.max())
-    ax.grid(alpha=0.2, axis="x", which="major")
-    ax.grid(alpha=0.06, axis="x", which="minor")
+    if len(dt_index) == 0:
+        return
+
+    x_count = len(dt_index)
+    tick_count = min(12, x_count)
+    tick_positions = np.linspace(0, x_count - 1, num=tick_count, dtype=int)
+    tick_positions = np.unique(tick_positions)
+    tick_labels = [pd.Timestamp(dt_index[pos]).strftime("%Y-%m-%d") for pos in tick_positions]
+
+    ax.set_xlim(0, x_count - 1)
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=9)
+    ax.grid(alpha=0.2, axis="x")
+
+
+def _time_to_trading_day_positions(index: pd.Index, ts_series: pd.Series) -> np.ndarray:
+    dt_index = pd.to_datetime(index)
+    dt_series = pd.to_datetime(ts_series)
+    positions = dt_index.get_indexer(dt_series, method="nearest")
+    return positions[positions >= 0]
 
 
 def plot_daily_cumulative_return_comparison(
@@ -224,10 +235,11 @@ def plot_daily_cumulative_return_comparison(
         sharex=True,
         gridspec_kw={"height_ratios": [4, 1], "hspace": 0.05},
     )
-    ax_main.plot(compare.index, compare["策略累计收益"] * 100, label="策略累计收益", color="#2ca02c", linewidth=1.3)
-    ax_main.plot(compare.index, compare["长期持有累计收益"] * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
+    x = np.arange(len(compare))
+    ax_main.plot(x, compare["策略累计收益"].values * 100, label="策略累计收益", color="#2ca02c", linewidth=1.3)
+    ax_main.plot(x, compare["长期持有累计收益"].values * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
     if baseline_series is not None and baseline_label in compare.columns:
-        ax_main.plot(compare.index, compare[baseline_label] * 100, label=baseline_label, color="#ff7f0e", linewidth=1.1, linestyle="--")
+        ax_main.plot(x, compare[baseline_label].values * 100, label=baseline_label, color="#ff7f0e", linewidth=1.1, linestyle="--")
 
     trade_frames: list[pd.DataFrame] = []
     if trades is not None and len(trades) > 0:
@@ -244,16 +256,21 @@ def plot_daily_cumulative_return_comparison(
     if trade_frames:
         trade_df = pd.concat(trade_frames, ignore_index=True, sort=False)
         marker_line = compare["长期持有累计收益"] if signal_on_benchmark_curve else compare["策略累计收益"]
-        entry_points = marker_line.reindex(pd.to_datetime(trade_df["EntryTime"]), method="ffill").dropna()
+
+        entry_pos = _time_to_trading_day_positions(compare.index, trade_df["EntryTime"])
         closed_trade_df = trade_df.loc[~trade_df.get("IsOpen", False).fillna(False)]
-        exit_points = marker_line.reindex(pd.to_datetime(closed_trade_df["ExitTime"]), method="ffill").dropna()
-        open_points = marker_line.reindex(pd.to_datetime(trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"]), method="ffill").dropna()
-        if not entry_points.empty:
-            ax_main.scatter(entry_points.index, entry_points.values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
-        if not exit_points.empty:
-            ax_main.scatter(exit_points.index, exit_points.values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
-        if not open_points.empty:
-            ax_main.scatter(open_points.index, open_points.values * 100, marker="s", color="#8c564b", s=32, label="期末持有", zorder=6)
+        exit_pos = _time_to_trading_day_positions(compare.index, closed_trade_df["ExitTime"])
+        open_pos = _time_to_trading_day_positions(
+            compare.index,
+            trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"],
+        )
+
+        if len(entry_pos) > 0:
+            ax_main.scatter(entry_pos, marker_line.iloc[entry_pos].values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
+        if len(exit_pos) > 0:
+            ax_main.scatter(exit_pos, marker_line.iloc[exit_pos].values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
+        if len(open_pos) > 0:
+            ax_main.scatter(open_pos, marker_line.iloc[open_pos].values * 100, marker="s", color="#8c564b", s=32, label="期末持有", zorder=6)
 
     ax_main.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
     ax_main.set_title(_title_with_year(title, compare.index))
@@ -261,13 +278,13 @@ def plot_daily_cumulative_return_comparison(
     ax_main.legend()
     ax_main.grid(alpha=0.2)
 
-    ax_pos.plot(compare.index, compare["策略仓位"] * 100, color="#6a9f6a", linewidth=1.0)
-    ax_pos.fill_between(compare.index, 0, compare["策略仓位"] * 100, color="#8fbf8f", alpha=0.35)
+    ax_pos.plot(x, compare["策略仓位"].values * 100, color="#6a9f6a", linewidth=1.0)
+    ax_pos.fill_between(x, 0, compare["策略仓位"].values * 100, color="#8fbf8f", alpha=0.35)
     ax_pos.set_ylabel("仓位 (%)")
-    ax_pos.set_xlabel("日期")
+    ax_pos.set_xlabel("交易日")
     ax_pos.grid(alpha=0.2, axis="y")
     ax_pos.set_ylim(0, max(100.0, float(compare["策略仓位"].max() * 110.0) if not compare.empty else 100.0))
-    _configure_dense_date_axis(ax_pos, compare.index)
+    _configure_trading_day_axis(ax_pos, compare.index)
 
     fig.subplots_adjust(hspace=0.08)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,23 +304,27 @@ def plot_multi_strategy_cumulative_comparison(
     colors = ["#2ca02c", "#d62728", "#ff7f0e", "#8c564b", "#17becf"]
     plt.figure(figsize=(14, 6))
 
-    for idx, (label, curve) in enumerate(strategy_curves.items()):
+    for label, curve in strategy_curves.items():
         daily = curve["Equity"].pct_change().fillna(0.0)
         cum = (1 + daily).cumprod() - 1
         compare_data[label] = cum
-        plt.plot(cum.index, cum.values * 100, label=label, color=colors[idx % len(colors)], linewidth=1.3)
 
     buy_hold_daily = benchmark_close.pct_change().fillna(0.0)
     compare_data["长期持有累计收益"] = (1 + buy_hold_daily).cumprod() - 1
     compare = pd.DataFrame(compare_data)
-    plt.plot(compare.index, compare["长期持有累计收益"] * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
+    x = np.arange(len(compare))
+
+    for idx, label in enumerate(strategy_curves.keys()):
+        plt.plot(x, compare[label].values * 100, label=label, color=colors[idx % len(colors)], linewidth=1.3)
+
+    plt.plot(x, compare["长期持有累计收益"].values * 100, label="长期持有累计收益", color="#1f77b4", linewidth=1.1)
     plt.axhline(0, color="#333333", linewidth=1, linestyle="--", label="基准线(0%)")
     plt.title(_title_with_year(title, compare.index))
-    plt.xlabel("日期")
+    plt.xlabel("交易日")
     plt.ylabel("累计收益率 (%)")
     plt.legend()
     plt.grid(alpha=0.2)
-    _configure_dense_date_axis(plt.gca(), compare.index)
+    _configure_trading_day_axis(plt.gca(), compare.index)
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
