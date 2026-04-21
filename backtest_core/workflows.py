@@ -24,6 +24,7 @@ from .parameters import (
 )
 from .reporting import (
     export_trade_records_csv,
+    generate_interactive_backtest_report_html,
     plot_annual_return_comparison,
     plot_daily_cumulative_return_comparison,
     plot_multi_strategy_cumulative_comparison,
@@ -85,6 +86,12 @@ def _resolve_initial_position(
     )
 
 
+def _daily_plot_price_series(data: pd.DataFrame) -> pd.Series:
+    if "Open" in data.columns:
+        return data["Open"]
+    return data["Close"]
+
+
 def run_walk_forward_validation_3y1y(
     base_data: pd.DataFrame,
     param_space: dict[str, list],
@@ -135,7 +142,7 @@ def run_walk_forward_validation_3y1y(
             )
             daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=val_stats["_equity_curve"],
-                benchmark_close=val_data["Close"],
+                benchmark_close=_daily_plot_price_series(val_data),
                 title=f"3年训练1年验证窗口{window_idx}: 策略 vs 长期持有（每日累计收益）",
                 output_path=daily_png,
                 trades=val_stats["_trades"],
@@ -161,6 +168,16 @@ def run_walk_forward_validation_3y1y(
                 params=best_params,
                 native_reason_records=getattr(val_stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=val_stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=val_data,
+                strategy_equity_curve=val_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_interactive_report.html",
+                title=f"3年训练1年验证窗口{window_idx} 交互回测报告",
+                trades=val_stats.get("_trades"),
+                strategy_obj=val_stats.get("_strategy"),
+                baseline_series=val_data["PolyBasePred"] if "PolyBasePred" in val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
             )
 
         metrics = summarize_backtest_metrics(val_stats, val_data["Close"])
@@ -241,7 +258,7 @@ def run_ma_walk_forward_validation_3y1y(
             annual_df = plot_annual_return_comparison(stats["_equity_curve"], val_data["Close"], f"窗口{window_idx}: MA{int(ma_window_days)} 策略 vs 长期持有（年度独立收益）", annual_png)
             daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=stats["_equity_curve"],
-                benchmark_close=val_data["Close"],
+                benchmark_close=_daily_plot_price_series(val_data),
                 title=f"窗口{window_idx}: MA{int(ma_window_days)} 策略 vs 长期持有（每日累计收益）",
                 output_path=daily_png,
                 trades=stats["_trades"],
@@ -269,6 +286,16 @@ def run_ma_walk_forward_validation_3y1y(
                 params=best_params,
                 native_reason_records=getattr(stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=val_data,
+                strategy_equity_curve=stats["_equity_curve"],
+                output_path=reports / f"{prefix}_{window_idx:02d}_interactive_report.html",
+                title=f"窗口{window_idx}: MA{int(ma_window_days)} 交互回测报告",
+                trades=stats.get("_trades"),
+                strategy_obj=stats.get("_strategy"),
+                baseline_series=val_data["MABase"] if "MABase" in val_data.columns else None,
+                baseline_label="MA基准累计收益",
             )
             annual_images.append(annual_png)
             daily_images.append(daily_png)
@@ -361,7 +388,7 @@ def run_polyfit_walk_forward_validation_3y1y(
             annual_df = plot_annual_return_comparison(stats["_equity_curve"], val_data["Close"], f"窗口{window_idx}: Polyfit拟合窗{int(fit_window_days)} 策略 vs 长期持有（年度独立收益）", annual_png)
             daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=stats["_equity_curve"],
-                benchmark_close=val_data["Close"],
+                benchmark_close=_daily_plot_price_series(val_data),
                 title=f"窗口{window_idx}: Polyfit拟合窗{int(fit_window_days)} 策略 vs 长期持有（每日累计收益）",
                 output_path=daily_png,
                 trades=stats["_trades"],
@@ -389,6 +416,16 @@ def run_polyfit_walk_forward_validation_3y1y(
                 params=best_params,
                 native_reason_records=getattr(stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=val_data,
+                strategy_equity_curve=stats["_equity_curve"],
+                output_path=reports / f"{prefix}_{window_idx:02d}_interactive_report.html",
+                title=f"窗口{window_idx}: Polyfit拟合窗{int(fit_window_days)} 交互回测报告",
+                trades=stats.get("_trades"),
+                strategy_obj=stats.get("_strategy"),
+                baseline_series=val_data["PolyBasePred"] if "PolyBasePred" in val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
             )
             annual_images.append(annual_png)
             daily_images.append(daily_png)
@@ -620,7 +657,7 @@ def run_polyfit_ma_comparison_3y1y(
 
             polyfit_daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=polyfit_stats["_equity_curve"],
-                benchmark_close=polyfit_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(polyfit_val_data),
                 title=f"窗口{window_idx}: 回归策略 vs 长期持有（每日累计收益）",
                 output_path=polyfit_daily_png,
                 trades=polyfit_stats["_trades"],
@@ -630,7 +667,7 @@ def run_polyfit_ma_comparison_3y1y(
             )
             ma_daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=ma_stats["_equity_curve"],
-                benchmark_close=ma_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(ma_val_data),
                 title=f"窗口{window_idx}: MA 基准策略 vs 长期持有（每日累计收益）",
                 output_path=ma_daily_png,
                 trades=ma_stats["_trades"],
@@ -671,6 +708,26 @@ def run_polyfit_ma_comparison_3y1y(
                 params=ma_best_params,
                 native_reason_records=getattr(ma_stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=ma_stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=polyfit_val_data,
+                strategy_equity_curve=polyfit_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_polyfit_interactive_report.html",
+                title=f"窗口{window_idx}: 回归策略 交互回测报告",
+                trades=polyfit_stats.get("_trades"),
+                strategy_obj=polyfit_stats.get("_strategy"),
+                baseline_series=polyfit_val_data["PolyBasePred"] if "PolyBasePred" in polyfit_val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=ma_val_data,
+                strategy_equity_curve=ma_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_ma_interactive_report.html",
+                title=f"窗口{window_idx}: MA策略 交互回测报告",
+                trades=ma_stats.get("_trades"),
+                strategy_obj=ma_stats.get("_strategy"),
+                baseline_series=ma_val_data["MABase"] if "MABase" in ma_val_data.columns else None,
+                baseline_label="MA基准累计收益",
             )
 
         polyfit_metrics = summarize_backtest_metrics(polyfit_stats, polyfit_val_data["Close"])
@@ -795,7 +852,7 @@ def run_polyfit_switch_comparison_3y1y(
             )
             polyfit_daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=polyfit_stats["_equity_curve"],
-                benchmark_close=polyfit_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(polyfit_val_data),
                 title=f"窗口{window_idx}: Polyfit策略 vs 长期持有（每日累计收益）",
                 output_path=polyfit_daily_png,
                 trades=polyfit_stats["_trades"],
@@ -811,7 +868,7 @@ def run_polyfit_switch_comparison_3y1y(
             )
             switch_daily_df = plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=switch_stats["_equity_curve"],
-                benchmark_close=switch_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(switch_val_data),
                 title=f"窗口{window_idx}: 偏离度+MA切换策略 vs 长期持有（每日累计收益）",
                 output_path=switch_daily_png,
                 trades=switch_stats["_trades"],
@@ -854,6 +911,26 @@ def run_polyfit_switch_comparison_3y1y(
                 params=switch_best_params,
                 native_reason_records=getattr(switch_stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=switch_stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=polyfit_val_data,
+                strategy_equity_curve=polyfit_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_polyfit_interactive_report.html",
+                title=f"窗口{window_idx}: Polyfit策略 交互回测报告",
+                trades=polyfit_stats.get("_trades"),
+                strategy_obj=polyfit_stats.get("_strategy"),
+                baseline_series=polyfit_val_data["PolyBasePred"] if "PolyBasePred" in polyfit_val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=switch_val_data,
+                strategy_equity_curve=switch_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_switch_interactive_report.html",
+                title=f"窗口{window_idx}: 偏离度+MA切换策略 交互回测报告",
+                trades=switch_stats.get("_trades"),
+                strategy_obj=switch_stats.get("_strategy"),
+                baseline_series=switch_val_data["PolyBasePred"] if "PolyBasePred" in switch_val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
             )
             annual_images.append(pair_daily_png)
             daily_images.append(switch_daily_png)
@@ -998,7 +1075,7 @@ def run_polyfit_stoploss_nextday_guard_switch_comparison_3y1y(
             )
             plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=switch_stats["_equity_curve"],
-                benchmark_close=switch_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(switch_val_data),
                 title=f"窗口{window_idx}: Switch策略 vs 长期持有（每日累计收益）",
                 output_path=switch_daily_png,
                 trades=switch_stats["_trades"],
@@ -1014,7 +1091,7 @@ def run_polyfit_stoploss_nextday_guard_switch_comparison_3y1y(
             )
             plot_daily_cumulative_return_comparison(
                 strategy_equity_curve=guard_stats["_equity_curve"],
-                benchmark_close=guard_val_data["Close"],
+                benchmark_close=_daily_plot_price_series(guard_val_data),
                 title=f"窗口{window_idx}: 止损次日偏离度保护策略 vs 长期持有（每日累计收益）",
                 output_path=guard_daily_png,
                 trades=guard_stats["_trades"],
@@ -1052,6 +1129,26 @@ def run_polyfit_stoploss_nextday_guard_switch_comparison_3y1y(
                 params=guard_best_params,
                 native_reason_records=getattr(guard_stats.get("_strategy"), "trade_reason_records", None),
                 strategy_obj=guard_stats.get("_strategy"),
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=switch_val_data,
+                strategy_equity_curve=switch_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_switch_interactive_report.html",
+                title=f"窗口{window_idx}: Switch策略 交互回测报告",
+                trades=switch_stats.get("_trades"),
+                strategy_obj=switch_stats.get("_strategy"),
+                baseline_series=switch_val_data["PolyBasePred"] if "PolyBasePred" in switch_val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
+            )
+            generate_interactive_backtest_report_html(
+                bt_data=guard_val_data,
+                strategy_equity_curve=guard_stats["_equity_curve"],
+                output_path=reports / f"wf3y1y_{window_idx:02d}_guard_switch_interactive_report.html",
+                title=f"窗口{window_idx}: 止损次日偏离度保护策略 交互回测报告",
+                trades=guard_stats.get("_trades"),
+                strategy_obj=guard_stats.get("_strategy"),
+                baseline_series=guard_val_data["PolyBasePred"] if "PolyBasePred" in guard_val_data.columns else None,
+                baseline_label="Polyfit基准累计收益",
             )
             annual_images.append(pair_daily_png)
             daily_images.append(guard_daily_png)

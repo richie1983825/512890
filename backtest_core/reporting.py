@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -259,16 +260,46 @@ def plot_daily_cumulative_return_comparison(
 
         entry_pos = _time_to_trading_day_positions(compare.index, trade_df["EntryTime"])
         closed_trade_df = trade_df.loc[~trade_df.get("IsOpen", False).fillna(False)]
-        exit_pos = _time_to_trading_day_positions(compare.index, closed_trade_df["ExitTime"])
+        profit_series = closed_trade_df.get("ReturnPct")
+        if profit_series is None:
+            profit_series = closed_trade_df.get("PnL")
+        if profit_series is None:
+            profit_series = pd.Series(0.0, index=closed_trade_df.index)
+        profit_series = profit_series.fillna(0.0)
+
+        profit_trade_df = closed_trade_df.loc[profit_series >= 0]
+        loss_trade_df = closed_trade_df.loc[profit_series < 0]
+        profit_exit_pos = _time_to_trading_day_positions(compare.index, profit_trade_df["ExitTime"])
+        loss_exit_pos = _time_to_trading_day_positions(compare.index, loss_trade_df["ExitTime"])
         open_pos = _time_to_trading_day_positions(
             compare.index,
             trade_df.loc[trade_df.get("IsOpen", False).fillna(False), "ExitTime"],
         )
 
         if len(entry_pos) > 0:
-            ax_main.scatter(entry_pos, marker_line.iloc[entry_pos].values * 100, marker="^", color="#d62728", s=28, label="买点", zorder=5)
-        if len(exit_pos) > 0:
-            ax_main.scatter(exit_pos, marker_line.iloc[exit_pos].values * 100, marker="v", color="#9467bd", s=28, label="卖点", zorder=5)
+            ax_main.scatter(entry_pos, marker_line.iloc[entry_pos].values * 100, marker="^", color="#f2c230", s=34, label="买点", zorder=5)
+        if len(profit_exit_pos) > 0:
+            ax_main.scatter(
+                profit_exit_pos,
+                marker_line.iloc[profit_exit_pos].values * 100,
+                marker="+",
+                color="#2ca02c",
+                s=64,
+                linewidths=1.4,
+                label="盈利卖点",
+                zorder=5,
+            )
+        if len(loss_exit_pos) > 0:
+            ax_main.scatter(
+                loss_exit_pos,
+                marker_line.iloc[loss_exit_pos].values * 100,
+                marker="_",
+                color="#d62728",
+                s=110,
+                linewidths=2.0,
+                label="亏损卖点",
+                zorder=5,
+            )
         if len(open_pos) > 0:
             ax_main.scatter(open_pos, marker_line.iloc[open_pos].values * 100, marker="s", color="#8c564b", s=32, label="期末持有", zorder=6)
 
@@ -330,6 +361,501 @@ def plot_multi_strategy_cumulative_comparison(
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     return compare
+
+
+def generate_interactive_backtest_report_html(
+    bt_data: pd.DataFrame,
+    strategy_equity_curve: pd.DataFrame,
+    output_path: Path,
+    title: str,
+    trades: pd.DataFrame | None = None,
+    strategy_obj: object | None = None,
+    baseline_series: pd.Series | None = None,
+    baseline_label: str = "策略基准累计收益",
+    symbol: str = "512890",
+) -> None:
+    if bt_data is None or len(bt_data.index) == 0:
+        raise ValueError("bt_data 为空，无法生成交互报告")
+
+    index = pd.to_datetime(bt_data.index)
+    close = bt_data["Close"].reindex(index).ffill().bfill()
+    open_series = bt_data["Open"].reindex(index).ffill().bfill() if "Open" in bt_data.columns else close
+    high_series = bt_data["High"].reindex(index).ffill().bfill() if "High" in bt_data.columns else close
+    low_series = bt_data["Low"].reindex(index).ffill().bfill() if "Low" in bt_data.columns else close
+
+    equity = strategy_equity_curve["Equity"].reindex(index).ffill().bfill()
+    strategy_cum = (equity / equity.iloc[0] - 1.0) * 100.0
+    if baseline_series is not None:
+        baseline = baseline_series.reindex(index).ffill().bfill()
+        baseline_cum = (baseline / baseline.iloc[0] - 1.0) * 100.0
+    else:
+        baseline_cum = pd.Series(0.0, index=index, dtype=float)
+        baseline_label = "基准线(0%)"
+    position_ratio = calc_daily_position_ratio(
+        strategy_equity_curve,
+        close,
+        trades=trades,
+        strategy_obj=strategy_obj,
+    )
+    position_pct = position_ratio.reindex(index).fillna(0.0) * 100.0
+
+    trade_frames: list[pd.DataFrame] = []
+    if trades is not None and len(trades) > 0:
+        trade_df = trades.copy()
+        trade_df["EntryTime"] = pd.to_datetime(trade_df["EntryTime"])
+        trade_df["ExitTime"] = pd.to_datetime(trade_df["ExitTime"])
+        trade_df["IsOpen"] = False
+        trade_frames.append(trade_df)
+
+    open_trade_df = _build_open_trade_frame(strategy_obj, bt_data)
+    if len(open_trade_df) > 0:
+        trade_frames.append(open_trade_df)
+
+    entry_points: list[list[float | int | str]] = []
+    profit_exit_points: list[list[float | int | str]] = []
+    loss_exit_points: list[list[float | int | str]] = []
+    open_points: list[list[float | int | str]] = []
+    trade_count = 0
+    marker_padding = np.maximum((high_series - low_series).abs().values, np.maximum(close.abs().values * 0.012, 0.01))
+
+    if trade_frames:
+        merged_trades = pd.concat(trade_frames, ignore_index=True, sort=False)
+        trade_count = int(len(merged_trades))
+
+        for _, trade in merged_trades.iterrows():
+            entry_pos = _time_to_trading_day_positions(index, pd.Series([trade["EntryTime"]]))
+            if len(entry_pos) > 0:
+                pos = int(entry_pos[0])
+                entry_points.append([pos, float(low_series.iloc[pos] - marker_padding[pos] * 1.15), str(pd.Timestamp(index[pos]).date())])
+
+            exit_pos = _time_to_trading_day_positions(index, pd.Series([trade["ExitTime"]]))
+            if len(exit_pos) == 0:
+                continue
+            pos = int(exit_pos[0])
+            exit_point = [pos, float(high_series.iloc[pos] + marker_padding[pos] * 1.15), str(pd.Timestamp(index[pos]).date())]
+
+            if bool(trade.get("IsOpen", False)):
+                open_points.append([pos, float(high_series.iloc[pos] + marker_padding[pos] * 1.9), str(pd.Timestamp(index[pos]).date())])
+                continue
+
+            pnl_value = trade.get("ReturnPct")
+            if pnl_value is None or pd.isna(pnl_value):
+                pnl_value = trade.get("PnL", 0.0)
+            pnl_value = float(0.0 if pd.isna(pnl_value) else pnl_value)
+            if pnl_value >= 0:
+                profit_exit_points.append(exit_point)
+            else:
+                loss_exit_points.append([pos, float(high_series.iloc[pos] + marker_padding[pos] * 1.55), str(pd.Timestamp(index[pos]).date())])
+
+    kline_data = [
+        [
+            float(open_series.iloc[i]),
+            float(close.iloc[i]),
+            float(low_series.iloc[i]),
+            float(high_series.iloc[i]),
+        ]
+        for i in range(len(index))
+    ]
+
+    payload = {
+        "title": title,
+        "symbol": symbol,
+        "dates": [ts.strftime("%Y-%m-%d") for ts in index],
+        "kline": kline_data,
+        "strategy_cum": [float(x) for x in strategy_cum.values],
+        "baseline_cum": [float(x) for x in baseline_cum.values],
+        "baseline_label": baseline_label,
+        "position_pct": [float(x) for x in position_pct.values],
+        "entry_points": entry_points,
+        "profit_exit_points": profit_exit_points,
+        "loss_exit_points": loss_exit_points,
+        "open_points": open_points,
+        "summary": {
+            "bars": int(len(index)),
+            "trades": trade_count,
+            "strategy_total_return_pct": float(strategy_cum.iloc[-1]),
+            "baseline_total_return_pct": float(baseline_cum.iloc[-1]),
+            "excess_return_pct": float(strategy_cum.iloc[-1] - baseline_cum.iloc[-1]),
+            "max_position_pct": float(position_pct.max()) if len(position_pct) > 0 else 0.0,
+        },
+    }
+
+    html = f"""<!doctype html>
+<html lang=\"zh-CN\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+    <title>{title}</title>
+    <script src=\"https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js\"></script>
+    <style>
+        :root {{
+            --bg: #06070a;
+            --bg-soft: #0e1015;
+            --panel: rgba(22, 24, 31, 0.68);
+            --panel-strong: rgba(18, 20, 27, 0.8);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --text: #f5f5f7;
+            --muted: #9a9aa1;
+            --accent: #64d2ff;
+            --gain: #ff453a;
+            --loss: #32d74b;
+        }}
+        * {{ box-sizing: border-box; }}
+        body {{
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif;
+            background:
+                radial-gradient(circle at 12% 0%, rgba(100, 210, 255, 0.18) 0%, rgba(100, 210, 255, 0.03) 18%, transparent 34%),
+                radial-gradient(circle at 88% 2%, rgba(191, 90, 242, 0.14) 0%, rgba(191, 90, 242, 0.02) 20%, transparent 38%),
+                linear-gradient(180deg, #11131a 0%, var(--bg) 38%, #040507 100%);
+            color: var(--text);
+        }}
+        .container {{
+            max-width: 1360px;
+            margin: 0 auto;
+            padding: 14px 14px 22px;
+        }}
+        .header {{
+            background: linear-gradient(180deg, rgba(28, 30, 38, 0.72) 0%, rgba(16, 18, 24, 0.78) 100%);
+            border: 1px solid var(--panel-border);
+            border-radius: 20px;
+            padding: 14px 16px 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(28px) saturate(130%);
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 18px;
+            font-weight: 640;
+            color: #f5f5f7;
+            letter-spacing: 0.005em;
+        }}
+        .sub {{
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 12px;
+        }}
+        .cards {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 8px;
+            margin: 10px 0 8px;
+        }}
+        .card {{
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 9px 11px 8px;
+            min-height: 58px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+            backdrop-filter: blur(24px) saturate(125%);
+        }}
+        .card .k {{
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.1;
+        }}
+        .card .v {{
+            margin-top: 5px;
+            font-size: 17px;
+            font-weight: 620;
+            color: var(--text);
+            letter-spacing: -0.02em;
+        }}
+        .card .v.pos {{ color: #ff6961; }}
+        .card .v.neg {{ color: #32d74b; }}
+        .panel {{
+            background: var(--panel-strong);
+            border: 1px solid var(--panel-border);
+            border-radius: 22px;
+            padding: 10px;
+            margin-top: 6px;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(32px) saturate(130%);
+        }}
+        #chart {{ height: 760px; }}
+        @media (max-width: 900px) {{
+            #chart {{ height: 620px; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class=\"container\">
+        <div class=\"header\">
+            <h1>{title}</h1>
+            <div class=\"sub\">标的: {symbol} | 鼠标滚轮可缩放，拖动可平移，悬浮可查看精确数据</div>
+        </div>
+        <div class=\"cards\">
+            <div class=\"card\"><div class=\"k\">交易日数量</div><div class=\"v\" id=\"bars\">-</div></div>
+            <div class=\"card\"><div class=\"k\">交易笔数</div><div class=\"v\" id=\"trades\">-</div></div>
+            <div class=\"card\"><div class=\"k\">策略总收益</div><div class=\"v\" id=\"strategyRet\">-</div></div>
+            <div class="card"><div class="k" id="baselineLabel">收益基准</div><div class="v" id="baselineRet">0.000%</div></div>
+            <div class="card"><div class="k">超额收益</div><div class="v" id="excessRet">-</div></div>
+        </div>
+        <div class=\"panel\"><div id=\"chart\"></div></div>
+    </div>
+
+    <script>
+        const payload = {json.dumps(payload, ensure_ascii=False)};
+        const pctText = (v) => `${{v >= 0 ? '+' : ''}}${{v.toFixed(3)}}%`;
+        const priceText = (v) => Number(v).toFixed(3);
+        const markerMap = new Map();
+        const pushMarker = (kind, points) => {{
+            points.forEach((point) => {{
+                const idx = point[0];
+                const current = markerMap.get(idx) || [];
+                current.push(kind);
+                markerMap.set(idx, current);
+            }});
+        }};
+        pushMarker('买点', payload.entry_points);
+        pushMarker('盈利卖点', payload.profit_exit_points);
+        pushMarker('亏损卖点', payload.loss_exit_points);
+        pushMarker('期末持有', payload.open_points);
+
+        const barsEl = document.getElementById('bars');
+        const tradesEl = document.getElementById('trades');
+        const strategyRetEl = document.getElementById('strategyRet');
+        const baselineLabelEl = document.getElementById('baselineLabel');
+        const baselineRetEl = document.getElementById('baselineRet');
+        const excessRetEl = document.getElementById('excessRet');
+
+        barsEl.textContent = payload.summary.bars;
+        tradesEl.textContent = payload.summary.trades;
+        strategyRetEl.textContent = pctText(payload.summary.strategy_total_return_pct);
+        baselineLabelEl.textContent = payload.baseline_label;
+        baselineRetEl.textContent = pctText(payload.summary.baseline_total_return_pct);
+        excessRetEl.textContent = pctText(payload.summary.excess_return_pct);
+        strategyRetEl.classList.add(payload.summary.strategy_total_return_pct >= 0 ? 'pos' : 'neg');
+        baselineRetEl.classList.add(payload.summary.baseline_total_return_pct >= 0 ? 'pos' : 'neg');
+        excessRetEl.classList.add(payload.summary.excess_return_pct >= 0 ? 'pos' : 'neg');
+
+        const chart = echarts.init(document.getElementById('chart'));
+        const chartOption = {{
+            backgroundColor: 'transparent',
+            textStyle: {{ color: '#f5f5f7' }},
+            color: ['#64d2ff', '#8e8e93', '#ffd60a', '#64d2ff', '#ff453a', '#bf5af2', 'rgba(100,210,255,0.62)'],
+            animation: false,
+            axisPointer: {{
+                link: [{{ xAxisIndex: 'all' }}],
+                lineStyle: {{ color: 'rgba(255,255,255,0.22)', width: 1 }},
+                label: {{
+                    backgroundColor: 'rgba(44, 46, 56, 0.94)',
+                    color: '#f5f5f7',
+                    borderRadius: 8
+                }}
+            }},
+            tooltip: {{
+                trigger: 'axis',
+                backgroundColor: 'rgba(20, 22, 28, 0.94)',
+                borderColor: 'rgba(255,255,255,0.07)',
+                borderWidth: 1,
+                textStyle: {{ color: '#f5f5f7' }},
+                axisPointer: {{ type: 'cross' }},
+                formatter: function(params) {{
+                    const idx = Array.isArray(params) && params.length ? params[0].dataIndex : 0;
+                    const candle = payload.kline[idx] || [0, 0, 0, 0];
+                    const markers = markerMap.get(idx) || [];
+                    const markerLine = markers.length ? `<div style=\"margin-top:6px;color:#ffd98a;\">信号: ${{markers.join(' / ')}}</div>` : '';
+                    return `
+                        <div style="min-width:190px;line-height:1.55;">
+                            <div style="font-size:12px;color:#a1a1a6;margin-bottom:4px;">${{payload.dates[idx] || ''}}</div>
+                            <div>开: <span style="color:#f5f5f7">${{priceText(candle[0])}}</span></div>
+                            <div>收: <span style="color:#f5f5f7">${{priceText(candle[1])}}</span></div>
+                            <div>低: <span style="color:#f5f5f7">${{priceText(candle[2])}}</span></div>
+                            <div>高: <span style="color:#f5f5f7">${{priceText(candle[3])}}</span></div>
+                            <div style="margin-top:6px;">策略累计: <span style="color:#64d2ff">${{pctText(payload.strategy_cum[idx] || 0)}}</span></div>
+                            <div>${{payload.baseline_label}}: <span style="color:#c6c6c8">${{pctText(payload.baseline_cum[idx] || 0)}}</span></div>
+                            <div>持仓量: <span style="color:#8ee7ff">${{pctText(payload.position_pct[idx] || 0)}}</span></div>
+                            ${{markerLine}}
+                        </div>
+                    `;
+                }}
+            }},
+            legend: {{
+                top: 6,
+                itemWidth: 12,
+                itemHeight: 7,
+                textStyle: {{ color: '#d2d2d7', fontSize: 11 }},
+                data: ['日K', '策略累计收益', payload.baseline_label, '买点', '盈利卖点', '亏损卖点', '期末持有', '持仓量']
+            }},
+            grid: [
+                {{ left: 58, right: 74, top: 42, height: '62%' }},
+                {{ left: 58, right: 74, top: '77%', height: '10%' }}
+            ],
+            xAxis: [
+                {{
+                    type: 'category',
+                    data: payload.dates,
+                    boundaryGap: true,
+                    axisLine: {{ onZero: false, lineStyle: {{ color: 'rgba(255,255,255,0.10)' }} }},
+                    axisTick: {{ show: false }},
+                    splitLine: {{ show: false }},
+                    min: 'dataMin',
+                    max: 'dataMax',
+                    axisLabel: {{ show: false }}
+                }},
+                {{
+                    type: 'category',
+                    gridIndex: 1,
+                    data: payload.dates,
+                    boundaryGap: true,
+                    axisLine: {{ onZero: false, lineStyle: {{ color: 'rgba(255,255,255,0.10)' }} }},
+                    axisTick: {{ show: false }},
+                    splitLine: {{ show: false }},
+                    min: 'dataMin',
+                    max: 'dataMax',
+                    axisLabel: {{ color: '#8e8e93', rotate: 28, fontSize: 10 }}
+                }}
+            ],
+            yAxis: [
+                {{
+                    scale: true,
+                    axisLabel: {{ color: '#a1a1a6', fontSize: 10 }},
+                    axisTick: {{ show: false }},
+                    axisLine: {{ show: false }},
+                    splitLine: {{ lineStyle: {{ color: 'rgba(255,255,255,0.045)', width: 0.6 }} }}
+                }},
+                {{
+                    scale: true,
+                    position: 'right',
+                    axisLabel: {{ formatter: '{{value}}%', color: '#7bdcff', fontSize: 10 }},
+                    axisTick: {{ show: false }},
+                    axisLine: {{ show: false }},
+                    splitLine: {{ show: false }}
+                }},
+                {{
+                    gridIndex: 1,
+                    min: 0,
+                    max: Math.max(100, Math.ceil(payload.summary.max_position_pct * 1.1)),
+                    axisLabel: {{ formatter: '{{value}}%', color: '#a1a1a6', fontSize: 10 }},
+                    axisTick: {{ show: false }},
+                    axisLine: {{ show: false }},
+                    splitLine: {{ lineStyle: {{ color: 'rgba(255,255,255,0.04)', width: 0.6 }} }}
+                }}
+            ],
+            dataZoom: [
+                {{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }},
+                {{
+                    type: 'slider',
+                    xAxisIndex: [0, 1],
+                    top: '92%',
+                    start: 0,
+                    end: 100,
+                    borderColor: 'rgba(255,255,255,0.04)',
+                    backgroundColor: 'rgba(255,255,255,0.03)',
+                    fillerColor: 'rgba(100,210,255,0.14)',
+                    dataBackground: {{
+                        lineStyle: {{ color: 'rgba(255,255,255,0.16)' }},
+                        areaStyle: {{ color: 'rgba(255,255,255,0.04)' }}
+                    }},
+                    textStyle: {{ color: '#8e8e93' }},
+                    handleStyle: {{ color: '#8e8e93', borderColor: 'rgba(255,255,255,0.1)' }},
+                    moveHandleStyle: {{ color: 'rgba(255,255,255,0.14)' }}
+                }}
+            ],
+            series: [
+                {{
+                    name: '日K',
+                    type: 'candlestick',
+                    xAxisIndex: 0,
+                    yAxisIndex: 0,
+                    data: payload.kline,
+                    itemStyle: {{
+                        color: '#ff453a',
+                        color0: '#30d158',
+                        borderColor: '#ff6961',
+                        borderColor0: '#32d74b'
+                    }}
+                }},
+                {{
+                    name: '策略累计收益',
+                    type: 'line',
+                    xAxisIndex: 0,
+                    yAxisIndex: 1,
+                    showSymbol: false,
+                    smooth: false,
+                    lineStyle: {{ width: 2.1, color: '#64d2ff' }},
+                    data: payload.strategy_cum
+                }},
+                {{
+                    name: payload.baseline_label,
+                    type: 'line',
+                    xAxisIndex: 0,
+                    yAxisIndex: 1,
+                    showSymbol: false,
+                    smooth: false,
+                    lineStyle: {{ width: 1.3, color: '#8e8e93', type: 'dashed' }},
+                    data: payload.baseline_cum
+                }},
+                {{
+                    name: '买点',
+                    type: 'scatter',
+                    xAxisIndex: 0,
+                    yAxisIndex: 0,
+                    symbol: 'triangle',
+                    symbolRotate: 0,
+                    symbolSize: 12,
+                    itemStyle: {{ color: '#ffd60a' }},
+                    data: payload.entry_points.map((d) => [d[0], d[1]])
+                }},
+                {{
+                    name: '盈利卖点',
+                    type: 'scatter',
+                    xAxisIndex: 0,
+                    yAxisIndex: 0,
+                    symbol: 'diamond',
+                    symbolSize: 10,
+                    itemStyle: {{ color: '#64d2ff' }},
+                    data: payload.profit_exit_points.map((d) => [d[0], d[1]])
+                }},
+                {{
+                    name: '亏损卖点',
+                    type: 'scatter',
+                    xAxisIndex: 0,
+                    yAxisIndex: 0,
+                    symbol: 'pin',
+                    symbolSize: 13,
+                    itemStyle: {{ color: '#ff453a' }},
+                    data: payload.loss_exit_points.map((d) => [d[0], d[1]])
+                }},
+                {{
+                    name: '期末持有',
+                    type: 'scatter',
+                    xAxisIndex: 0,
+                    yAxisIndex: 0,
+                    symbol: 'rect',
+                    symbolSize: 9,
+                    itemStyle: {{ color: '#bf5af2' }},
+                    data: payload.open_points.map((d) => [d[0], d[1]])
+                }},
+                {{
+                    name: '持仓量',
+                    type: 'bar',
+                    xAxisIndex: 1,
+                    yAxisIndex: 2,
+                    barWidth: '70%',
+                    itemStyle: {{
+                        color: 'rgba(100, 210, 255, 0.52)',
+                        borderRadius: [4, 4, 0, 0]
+                    }},
+                    data: payload.position_pct
+                }}
+            ]
+        }};
+        chart.setOption(chartOption);
+
+        window.addEventListener('resize', () => {{
+            chart.resize();
+        }});
+    </script>
+</body>
+</html>
+"""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html, encoding="utf-8")
 
 
 def print_daily_cumulative_returns_with_signals(

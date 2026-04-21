@@ -12,10 +12,17 @@ from backtest_core.reporting import (
     plot_daily_cumulative_return_comparison, 
     plot_multi_strategy_cumulative_comparison, 
     export_trade_records_csv, 
+    generate_interactive_backtest_report_html,
     summarize_backtest_metrics, 
     write_window_comparison_summary_markdown, 
     configure_chinese_font
 )
+
+
+def _daily_plot_price_series(data: pd.DataFrame) -> pd.Series:
+    if "Open" in data.columns:
+        return data["Open"]
+    return data["Close"]
 
 def run_task():
     configure_chinese_font()
@@ -148,7 +155,7 @@ def run_task():
         )
         plot_daily_cumulative_return_comparison(
             strategy_equity_curve=poly_stats["_equity_curve"],
-            benchmark_close=poly_val_data["Close"],
+            benchmark_close=_daily_plot_price_series(poly_val_data),
             title=f"{window_name} Polyfit 策略 vs 长期持有（每日累计收益）",
             output_path=window_dir / "polyfit_daily_cumulative_return_comparison.png",
             trades=poly_stats.get("_trades"),
@@ -159,7 +166,7 @@ def run_task():
         )
         plot_daily_cumulative_return_comparison(
             strategy_equity_curve=switch_stats["_equity_curve"],
-            benchmark_close=switch_val_data["Close"],
+            benchmark_close=_daily_plot_price_series(switch_val_data),
             title=f"{window_name} Switch 策略 vs 长期持有（每日累计收益）",
             output_path=switch_daily_png,
             trades=switch_stats.get("_trades"),
@@ -200,6 +207,26 @@ def run_task():
             params=switch_params,
             native_reason_records=getattr(switch_stats.get("_strategy"), "trade_reason_records", None),
             strategy_obj=switch_stats.get("_strategy"),
+        )
+        generate_interactive_backtest_report_html(
+            bt_data=poly_val_data,
+            strategy_equity_curve=poly_stats.get("_equity_curve"),
+            output_path=window_dir / "polyfit_interactive_report.html",
+            title=f"{window_name} Polyfit 交互回测报告",
+            trades=poly_stats.get("_trades"),
+            strategy_obj=poly_stats.get("_strategy"),
+            baseline_series=poly_val_data["PolyBasePred"] if "PolyBasePred" in poly_val_data.columns else None,
+            baseline_label="Polyfit基准累计收益",
+        )
+        generate_interactive_backtest_report_html(
+            bt_data=switch_val_data,
+            strategy_equity_curve=switch_stats.get("_equity_curve"),
+            output_path=window_dir / "switch_interactive_report.html",
+            title=f"{window_name} Switch 交互回测报告",
+            trades=switch_stats.get("_trades"),
+            strategy_obj=switch_stats.get("_strategy"),
+            baseline_series=switch_val_data["PolyBasePred"] if "PolyBasePred" in switch_val_data.columns else None,
+            baseline_label="Polyfit基准累计收益",
         )
 
         p_metrics = summarize_backtest_metrics(poly_stats, poly_val_data["Close"])

@@ -7,6 +7,23 @@
 
 主流程执行这两个策略的 3 年训练 + 1 年验证滚动对比，并输出参数扫描、对比图、成交记录和汇总结果。
 
+## 四策略当前平均收益
+
+基于最新报表（4 个验证窗口均值）统计如下：
+
+| 策略 | 平均总收益 | 平均最大回撤 |后续优化思路|
+| --- | ---: | ---: | ---: |
+| Polyfit | 15.21% | -6.40% ||
+| MA | 15.28% | -5.31% ||
+| Switch | 23.41% | -7.40% ||
+| Guard Switch | 22.35% | -7.74% | 引入量价关系，应对急涨急跌的情况|
+
+数据来源：
+
+- [reports/wf3y1y_polyfit_ma_strategy_summary.csv](reports/wf3y1y_polyfit_ma_strategy_summary.csv)
+- [reports/global_best_switch_ma20_60_hold45_seed342/wf3y1y_polyfit_switch_strategy_summary.csv](reports/global_best_switch_ma20_60_hold45_seed342/wf3y1y_polyfit_switch_strategy_summary.csv)
+- [reports/switch_stoploss_nextday_guard_scan_seed342/wf3y1y_polyfit_stoploss_nextday_guard_switch_strategy_summary.csv](reports/switch_stoploss_nextday_guard_scan_seed342/wf3y1y_polyfit_stoploss_nextday_guard_switch_strategy_summary.csv)
+
 ## 运行方式
 
 ```bash
